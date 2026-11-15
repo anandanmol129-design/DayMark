@@ -135,7 +135,7 @@ internal fun GroupedTaskListScreen(
     val current = pages.getOrNull(pagerState.currentPage)
 
     val washColor by animateColorAsState(current?.let(::folderColor) ?: Color.Transparent, tween(350), label = "folderWash")
-    Column(Modifier.fillMaxSize().background(folderWash(washColor))) {
+    Column(Modifier.fillMaxSize().folderWashBehind(washColor)) {
         Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.weight(1f))
             Glyph(ZenIcon.Mic, TodoMuted, 18.dp, modifier = Modifier.clip(CircleShape).clickable(onClick = onVoice).padding(10.dp))
@@ -305,7 +305,7 @@ private fun FolderChip(
             )
         }
         DropdownMenu(expanded = menuOpen && onRename != null, onDismissRequest = onMenuDismiss) {
-            DropdownMenuItem(text = { Text("Rename") }, onClick = { onMenuDismiss(); onRename?.invoke() })
+            DropdownMenuItem(text = { Text("Edit") }, onClick = { onMenuDismiss(); onRename?.invoke() })
             if (onDelete != null) DropdownMenuItem(
                 text = { Text(if (taskCount > 0) "Delete · $taskCount task${if (taskCount == 1) "" else "s"}" else "Delete", color = Danger) },
                 onClick = { onMenuDismiss(); onDelete() }

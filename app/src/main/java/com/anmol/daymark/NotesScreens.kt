@@ -79,7 +79,10 @@ internal fun NotesPagesScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Color.Transparent)) {
+    val washColor by androidx.compose.animation.animateColorAsState(
+        pages.getOrNull(pagerState.currentPage)?.let(::folderColor) ?: Color.Transparent, androidx.compose.animation.core.tween(350), label = "folderWash"
+    )
+    Column(Modifier.fillMaxSize().folderWashBehind(washColor, .17f)) {
         androidx.compose.animation.AnimatedVisibility(privateOpen) { PrivateBanner(onLockPrivate) }
         HorizontalPager(
             state = pagerState,
@@ -92,7 +95,7 @@ internal fun NotesPagesScreen(
             val folderNotes = cards.filter { it.columnId == folder?.id }.sortedByDescending { it.createdAt }
             val isSaved = page?.id == DEFAULT_SAVED_PAGE_ID
 
-            Column(Modifier.fillMaxSize().background(folderWash(page?.let(::folderColor) ?: Color.Transparent, .17f))) {
+            Column(Modifier.fillMaxSize()) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 18.dp, bottom = 3.dp),
                     verticalAlignment = Alignment.CenterVertically

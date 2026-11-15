@@ -155,7 +155,7 @@ internal fun PageTitle(name: String, deletable: Boolean, onDelete: () -> Unit, m
             modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(enabled = deletable || onEdit != null) { menu = true }
         )
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            if (onEdit != null) DropdownMenuItem(text = { Text("Rename or recolour") }, onClick = { menu = false; onEdit() })
+            if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
             if (deletable) DropdownMenuItem(text = { Text("Delete page", color = Danger) }, onClick = { menu = false; onDelete() })
         }
     }
