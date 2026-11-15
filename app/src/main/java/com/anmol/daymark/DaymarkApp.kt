@@ -5,7 +5,6 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.provider.CalendarContract
 import android.speech.RecognizerIntent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -77,7 +76,14 @@ internal fun DaymarkApp(
     onWidgetRequestHandled: () -> Unit = {}
 ) {
     var snapshot by remember { mutableStateOf(store.load()) }
-    LaunchedEffect(resumeTick) { if (resumeTick > 0) snapshot = withContext(BoardStore.io) { store.load() } }
+    val syncContext = LocalContext.current
+    LaunchedEffect(resumeTick) {
+        if (resumeTick > 0) {
+            snapshot = withContext(BoardStore.io) { store.load() }
+            // After the reload, so the sync's changes land on the fresh cards.
+            CalendarSync.syncNow(syncContext, manual = false)
+        }
+    }
     // A reminder's Done/Snooze can change the store while the app is open; pick that up.
     val reminderEdits by Reminders.externalEdits.collectAsState()
     LaunchedEffect(reminderEdits) { if (reminderEdits > 0) snapshot = withContext(BoardStore.io) { store.load() } }
@@ -95,6 +101,7 @@ internal fun DaymarkApp(
     var pageToDelete by remember { mutableStateOf<BoardPage?>(null) }
     var pageToRename by remember { mutableStateOf<BoardPage?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showCalendarSettings by rememberSaveable { mutableStateOf(false) }
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var viewingSave by remember { mutableStateOf<BoardCard?>(null) }
     var calendarJump by remember { mutableStateOf<Pair<Long, Int>?>(null) }
@@ -202,7 +209,13 @@ internal fun DaymarkApp(
         showMessage(if (existing) "Habit updated" else "Habit added")
     }
 
-    fun importSyncedCalendarEvents() = importCalendarEvents(context, snapshot, ::update, ::showMessage)
+    // Two-way calendar sync (CalendarSync.kt): apply the card changes a sync works out to what's on screen.
+    val calendarPatches by CalendarSync.patchTick.collectAsState()
+    LaunchedEffect(calendarPatches) { CalendarSync.drainPatches(context) { patch -> patch.apply(snapshot).let { if (it !== snapshot) update(it) } } }
+    fun importSyncedCalendarEvents() {
+        if (CalendarSync.hasChoice(context, snapshot)) CalendarSync.syncNow(context, manual = true, onMessage = ::showMessage)
+        else showCalendarSettings = true
+    }
 
     val calendarPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) importSyncedCalendarEvents() else showMessage("Allow calendar access to import events")
@@ -259,15 +272,19 @@ internal fun DaymarkApp(
             )
         }))
     }
-    val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+    fun addSavedImages(paths: List<String>) {
         val column = snapshot.columns.firstOrNull { it.pageId == DEFAULT_SAVED_PAGE_ID }
-        if (column != null && uris.isNotEmpty()) {
-            val added = uris.mapNotNull { Saves.copyImage(context, it) }.map { Saves.imageCard(column.id, it).copy(isPrivate = privateOpen) }
-            if (added.isNotEmpty()) {
-                update(snapshot.copy(cards = added + snapshot.cards))
-                showMessage("Saved ${added.size} image${if (added.size == 1) "" else "s"}")
-            }
+        if (column != null && paths.isNotEmpty()) {
+            val added = paths.map { Saves.imageCard(column.id, it).copy(isPrivate = privateOpen) }
+            update(snapshot.copy(cards = added + snapshot.cards))
+            showMessage("Saved ${added.size} image${if (added.size == 1) "" else "s"}")
         }
+    }
+    // One picked image gets the crop page first; several are saved as they are.
+    var cropSaveUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+        if (uris.size == 1) cropSaveUri = uris[0]
+        else addSavedImages(uris.mapNotNull { Saves.copyImage(context, it) })
     }
 
     LaunchedEffect(Unit) { lastBackup = Backup.lastBackupMillis(context) }
@@ -281,6 +298,34 @@ internal fun DaymarkApp(
             result.onSuccess { summary ->
                 lastBackup = Backup.lastBackupMillis(context)
                 showMessage("Backed up ${summary.cards} item${if (summary.cards == 1) "" else "s"} and ${summary.images} image${if (summary.images == 1) "" else "s"}")
+            }.onFailure { showMessage(it.message ?: "Backup failed") }
+        }
+    }
+    // Writes the backup to the app's cache and opens the Android share sheet, so it can go to Drive, email, a chat or anywhere else.
+    fun shareBackup() {
+        backupBusy = true
+        val current = snapshot
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dir = java.io.File(context.cacheDir, "backups").apply { deleteRecursively(); mkdirs() }
+                    val file = java.io.File(dir, Backup.fileName())
+                    Backup.export(context, current, Uri.fromFile(file))
+                    file
+                }
+            }
+            backupBusy = false
+            result.onSuccess { file ->
+                lastBackup = Backup.lastBackupMillis(context)
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_TITLE, file.name)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                runCatching { context.startActivity(Intent.createChooser(send, "Share backup").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { showMessage("No app can take the backup") }
             }.onFailure { showMessage(it.message ?: "Backup failed") }
         }
     }
@@ -303,7 +348,8 @@ internal fun DaymarkApp(
         }
     }
 
-    BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showSettings && !showCalendarSettings) { showSettings = false }
+    BackHandler(enabled = showCalendarSettings) { showCalendarSettings = false }
     BackHandler(enabled = showSearch) { showSearch = false }
 
     // A tapped search result: go to its tab and page, then do what tapping it there does.
@@ -541,11 +587,21 @@ internal fun DaymarkApp(
             snackbar = snackbar,
             onBack = { showSettings = false },
             onBackup = { exportBackup.launch(Backup.fileName()) },
+            onShareBackup = ::shareBackup,
             onRestore = { pickBackup.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) },
-            onImportCalendar = ::requestCalendarImport,
+            onImportCalendar = { showCalendarSettings = true },
             backdrop = backdrop,
             onBackdrop = onBackdrop
         )
+    }
+
+    // Settings › Calendar: which calendars to show and where Daymark's events sync to.
+    AnimatedVisibility(
+        visible = showCalendarSettings,
+        enter = fadeIn(tween(220)) + slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 6 },
+        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 6 }
+    ) {
+        CalendarSettingsScreen(snapshot = snapshot, snackbar = snackbar, onBack = { showCalendarSettings = false })
     }
 
     // Search covers the tab like Settings does, and closes when a result is picked.
@@ -558,6 +614,9 @@ internal fun DaymarkApp(
     }
 
     viewingSave?.let { SavedImageViewer(it) { viewingSave = null } }
+    cropSaveUri?.let { uri ->
+        ImageCropDialog(uri, CropAspect.Free, onCancel = { cropSaveUri = null }, onResult = { path -> cropSaveUri = null; addSavedImages(listOf(path)) })
+    }
 
     pendingRestore?.let { uri ->
         AlertDialog(
@@ -576,7 +635,7 @@ internal fun DaymarkApp(
         NewPageDialog(
             onDismiss = { showPageDialog = false },
             onCreate = { name ->
-                val page = BoardPage(name = name)
+                val page = BoardPage(name = name, color = newFolderColor(snapshot.todoPages))
                 val list = BoardColumn(workspace = Workspace.TODOS, name = name, pageId = page.id)
                 update(snapshot.copy(todoPages = snapshot.todoPages + page, columns = snapshot.columns + list))
                 selectedTodoPageId = page.id
@@ -589,7 +648,7 @@ internal fun DaymarkApp(
         NewFolderDialog(
             onDismiss = { showFolderDialog = false },
             onCreate = { name ->
-                val page = BoardPage(name = name)
+                val page = BoardPage(name = name, color = newFolderColor(snapshot.notesPages))
                 val folder = BoardColumn(workspace = Workspace.NOTES, name = name, pageId = page.id)
                 update(snapshot.copy(notesPages = snapshot.notesPages + page, columns = snapshot.columns + folder))
                 selectedNotesPageId = page.id
@@ -601,11 +660,13 @@ internal fun DaymarkApp(
     pageToRename?.let { page ->
         RenamePageDialog(
             current = page.name,
+            currentColor = folderColorIndex(page),
             onDismiss = { pageToRename = null },
-            onRename = { name ->
+            onRename = { name, color ->
                 update(snapshot.copy(
-                    todoPages = snapshot.todoPages.map { if (it.id == page.id) it.copy(name = name) else it },
-                    columns = snapshot.columns.map { if (it.pageId == page.id && it.workspace == Workspace.TODOS) it.copy(name = name) else it }
+                    todoPages = snapshot.todoPages.map { if (it.id == page.id) it.copy(name = name, color = color) else it },
+                    notesPages = snapshot.notesPages.map { if (it.id == page.id) it.copy(name = name, color = color) else it },
+                    columns = snapshot.columns.map { if (it.pageId == page.id) it.copy(name = name) else it }
                 ))
                 pageToRename = null
             }
@@ -709,92 +770,6 @@ internal fun DaymarkApp(
             onSelect = { pendingAppChoice = it; showAppPicker = false }
         )
     }
-}
-
-private fun importCalendarEvents(
-    context: Context,
-    snapshot: BoardSnapshot,
-    update: (BoardSnapshot) -> Unit,
-    showMessage: (String) -> Unit
-) {
-    val calendarColumn = snapshot.columnsFor(Workspace.CALENDAR).firstOrNull()
-    if (calendarColumn == null) {
-        showMessage("Create a calendar column before importing")
-        return
-    }
-    val startMillis = LocalDate.now().minusDays(90).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val endMillis = LocalDate.now().plusDays(366).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().appendPath(startMillis.toString()).appendPath(endMillis.toString()).build()
-    val (imported, colorUpdates, timeUpdates) = runCatching {
-        val existingBySource = snapshot.cards.filter { it.calendarSourceId.isNotBlank() }.associateBy { it.calendarSourceId }
-        val result = mutableListOf<BoardCard>()
-        val updatedColors = mutableMapOf<String, Long>()
-        val updatedTimes = mutableMapOf<String, Pair<Int?, Int>>()
-        context.contentResolver.query(
-            uri,
-            arrayOf(CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.DESCRIPTION, CalendarContract.Instances.DISPLAY_COLOR, CalendarContract.Instances.EVENT_COLOR, CalendarContract.Instances.CALENDAR_COLOR, CalendarContract.Instances.END, CalendarContract.Instances.ALL_DAY),
-            null, null, "${CalendarContract.Instances.BEGIN} ASC"
-        )?.use { cursor ->
-            val idIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.EVENT_ID)
-            val titleIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.TITLE)
-            val beginIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.BEGIN)
-            val descriptionIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.DESCRIPTION)
-            val colorIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.DISPLAY_COLOR)
-            val eventColorIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.EVENT_COLOR)
-            val calendarColorIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.CALENDAR_COLOR)
-            val endIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.END)
-            val allDayIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.ALL_DAY)
-            while (cursor.moveToNext()) {
-                val eventId = cursor.getLong(idIndex)
-                val begin = cursor.getLong(beginIndex)
-                val sourceId = "$eventId:$begin"
-                val title = cursor.getString(titleIndex)?.trim().orEmpty()
-                val rawColor = listOf(colorIndex, eventColorIndex, calendarColorIndex)
-                    .firstNotNullOfOrNull { index -> if (cursor.isNull(index)) null else cursor.getInt(index).takeIf { it != 0 } }
-                val normalizedColor = rawColor?.let { if (it ushr 24 == 0) it or (0xFF shl 24) else it }
-                val color = normalizedColor?.toLong()
-                val allDay = cursor.getInt(allDayIndex) == 1
-                val zone = java.time.ZoneId.systemDefault()
-                val startTime = java.time.Instant.ofEpochMilli(begin).atZone(zone).toLocalTime()
-                val minute = if (allDay) null else startTime.hour * 60 + startTime.minute
-                val duration = if (allDay) 0 else ((cursor.getLong(endIndex) - begin) / 60_000).toInt().coerceIn(0, 24 * 60)
-                if (sourceId in existingBySource) {
-                    updatedTimes[sourceId] = minute to duration
-                    if (color != null) updatedColors[sourceId] = color
-                } else if (title.isNotBlank()) {
-                    val date = java.time.Instant.ofEpochMilli(begin).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-                    val details = cursor.getString(descriptionIndex).orEmpty()
-                    result += BoardCard(
-                        workspace = Workspace.CALENDAR,
-                        columnId = calendarColumn.id,
-                        kind = CardKind.EVENT,
-                        title = title,
-                        details = details,
-                        dueDay = date.toEpochDay(),
-                        calendarSourceId = sourceId,
-                        calendarColor = color,
-                        dueMinute = minute,
-                        durationMinutes = duration
-                    )
-                }
-            }
-        }
-        Triple(result, updatedColors, updatedTimes)
-    }.getOrElse {
-        showMessage("Couldn’t read calendar events")
-        Triple(emptyList<BoardCard>(), emptyMap<String, Long>(), emptyMap<String, Pair<Int?, Int>>())
-    }
-    if (imported.isNotEmpty() || colorUpdates.isNotEmpty() || timeUpdates.isNotEmpty()) {
-        update(snapshot.copy(cards = snapshot.cards.map { card ->
-            val colored = colorUpdates[card.calendarSourceId]?.let { card.copy(calendarColor = it) } ?: card
-            timeUpdates[card.calendarSourceId]?.let { (minute, duration) -> colored.copy(dueMinute = minute, durationMinutes = duration) } ?: colored
-        } + imported))
-        val message = buildList {
-            if (imported.isNotEmpty()) add("Imported ${imported.size} event${if (imported.size == 1) "" else "s"}")
-            if (colorUpdates.isNotEmpty()) add("updated ${colorUpdates.size} event color${if (colorUpdates.size == 1) "" else "s"}")
-        }.joinToString(" · ")
-        showMessage(message.ifBlank { "Calendar times updated" })
-    } else showMessage("No new events found in the selected date range")
 }
 
 private fun cardFromDraft(workspace: Workspace, draft: CardDraft, snapshot: BoardSnapshot): BoardCard {

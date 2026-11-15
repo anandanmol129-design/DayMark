@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Two-way sync: Daymark copies its events to one chosen calendar and writes back edits to imported events. -->
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Reminders: notifications, exact alarms, alarm ringing, rescheduling after reboot. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -236,5 +238,15 @@
             android:taskAffinity="com.anmol.daymark.alarm"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
+        <!-- Shares a fresh backup zip with Drive (or any app) without exposing other files. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

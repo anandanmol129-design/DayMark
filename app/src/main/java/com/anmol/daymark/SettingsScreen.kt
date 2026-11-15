@@ -67,6 +67,7 @@ internal fun SettingsScreen(
     snackbar: SnackbarHostState,
     onBack: () -> Unit,
     onBackup: () -> Unit,
+    onShareBackup: () -> Unit,
     onRestore: () -> Unit,
     onImportCalendar: () -> Unit,
     backdrop: Backdrop,
@@ -117,6 +118,8 @@ internal fun SettingsScreen(
                 SettingsSection("Backup") {
                     SettingsRow(ZenIcon.Upload, "Back up now", backedUp, enabled = !busy, onClick = onBackup)
                     SettingsDivider()
+                    SettingsRow(ZenIcon.Share, "Share backup", "Send a copy to Drive, email or any app", enabled = !busy, onClick = onShareBackup)
+                    SettingsDivider()
                     SettingsRow(ZenIcon.Restore, "Restore from backup", "Replaces everything with a backup file", enabled = !busy, onClick = onRestore)
                 }
                 Text(
@@ -126,7 +129,7 @@ internal fun SettingsScreen(
             }
             item {
                 SettingsSection("Calendar") {
-                    SettingsRow(ZenIcon.Download, "Import device calendar", "Pull events from calendars on this phone", onClick = onImportCalendar)
+                    SettingsRow(ZenIcon.Calendar, "Calendars & sync", "Choose calendars to show, and two-way sync", onClick = onImportCalendar)
                 }
             }
             item { RemindersSettings(snackbar) }

@@ -76,6 +76,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -133,7 +134,8 @@ internal fun GroupedTaskListScreen(
     }
     val current = pages.getOrNull(pagerState.currentPage)
 
-    Column(Modifier.fillMaxSize()) {
+    val washColor by animateColorAsState(current?.let(::folderColor) ?: Color.Transparent, tween(350), label = "folderWash")
+    Column(Modifier.fillMaxSize().background(folderWash(washColor))) {
         Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.weight(1f))
             Glyph(ZenIcon.Mic, TodoMuted, 18.dp, modifier = Modifier.clip(CircleShape).clickable(onClick = onVoice).padding(10.dp))
@@ -242,7 +244,7 @@ internal fun GroupedTaskListScreen(
                 val dragged = draggingId == page.id
                 DisposableEffect(page.id) { onDispose { chipBounds.remove(page.id) } }
                 FolderChip(
-                    page.name, selected = page.id == selectedChipId,
+                    page.name, folderColor(page), selected = page.id == selectedChipId,
                     onRename = { onRenamePage(page) },
                     onDelete = if (page.id == DEFAULT_TODO_PAGE_ID) null else ({ onDeletePage(page) }),
                     taskCount = taskCount,
@@ -251,7 +253,7 @@ internal fun GroupedTaskListScreen(
                     modifier = (if (dragged) Modifier.zIndex(1f) else Modifier.animateItem()).onGloballyPositioned { chipBounds[page.id] = it.positionInRoot().x to it.size.width.toFloat(); if (draggingId == page.id) dragNatural = it.positionInRoot().x }
                 ) { scope.launch { pagerState.animateScrollToPage(pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0)) } }
             }
-            item(key = "new-folder") { FolderChip("+", selected = false, onClick = onNewPage) }
+            item(key = "new-folder") { FolderChip("+", Color.Transparent, selected = false, onClick = onNewPage) }
         }
         Spacer(Modifier.height(8.dp))
         HorizontalPager(
@@ -282,7 +284,7 @@ internal fun GroupedTaskListScreen(
  */
 @Composable
 private fun FolderChip(
-    label: String, selected: Boolean, onRename: (() -> Unit)? = null, onDelete: (() -> Unit)? = null, taskCount: Int = 0,
+    label: String, tint: Color, selected: Boolean, onRename: (() -> Unit)? = null, onDelete: (() -> Unit)? = null, taskCount: Int = 0,
     menuOpen: Boolean = false, onMenuDismiss: () -> Unit = {}, lifted: Boolean = false, offset: () -> Float = { 0f },
     modifier: Modifier = Modifier, onClick: () -> Unit
 ) {
@@ -297,7 +299,10 @@ private fun FolderChip(
             shadowElevation = if (lifted) 10.dp else 0.dp,
             modifier = Modifier.clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick)
         ) {
-            Text(label, color = text, fontSize = 15.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp))
+            Text(
+                label, color = text, fontSize = 15.sp, maxLines = 1,
+                modifier = Modifier.background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (selected) .34f else .16f), tint.copy(alpha = if (selected) .12f else .04f)))).padding(horizontal = 18.dp, vertical = 9.dp)
+            )
         }
         DropdownMenu(expanded = menuOpen && onRename != null, onDismissRequest = onMenuDismiss) {
             DropdownMenuItem(text = { Text("Rename") }, onClick = { onMenuDismiss(); onRename?.invoke() })

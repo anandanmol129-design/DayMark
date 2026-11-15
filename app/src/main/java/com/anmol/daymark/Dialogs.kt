@@ -8,6 +8,19 @@ import android.net.Uri
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
@@ -75,13 +88,15 @@ internal fun NewPageDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
 }
 
 @Composable
-internal fun RenamePageDialog(current: String, onDismiss: () -> Unit, onRename: (String) -> Unit) {
+internal fun RenamePageDialog(current: String, currentColor: Int, onDismiss: () -> Unit, onRename: (String, Int) -> Unit) {
     var name by rememberSaveable { mutableStateOf(current) }
+    var color by rememberSaveable { mutableStateOf(currentColor) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = GlassDialog,
-        title = { DialogBlur(); Text("Rename folder", color = TodoText) },
+        title = { DialogBlur(); Text("Edit folder", color = TodoText) },
         text = {
+          Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -90,9 +105,21 @@ internal fun RenamePageDialog(current: String, onDismiss: () -> Unit, onRename: 
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp)
             )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                HabitPalette.forEachIndexed { i, argb ->
+                    val selected = i == color
+                    Box(
+                        Modifier.size(30.dp).clip(CircleShape).border(2.dp, if (selected) TodoText else Color.Transparent, CircleShape).padding(4.dp)
+                            .clip(CircleShape).background(Color(argb.toInt())).clickable { color = i }
+                            .semantics { contentDescription = HabitColorNames[i] },
+                        contentAlignment = Alignment.Center
+                    ) { if (selected) Glyph(ZenIcon.Check, OnAccent, 12.dp) }
+                }
+            }
+          }
         },
         confirmButton = {
-            Button(onClick = { if (name.isNotBlank()) onRename(name.trim()) }, enabled = name.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = TodoBlue)) { Text("Save") }
+            Button(onClick = { if (name.isNotBlank()) onRename(name.trim(), color) }, enabled = name.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = TodoBlue)) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TodoMuted) } }
     )

@@ -50,6 +50,7 @@ internal fun NotesPagesScreen(
     onSelectPage: (String) -> Unit,
     onNewPage: () -> Unit,
     onDeletePage: (BoardPage) -> Unit,
+    onRenamePage: (BoardPage) -> Unit = {},
     onEditCard: (BoardCard) -> Unit,
     onPickImages: () -> Unit,
     onAddCard: (BoardColumn) -> Unit,
@@ -91,12 +92,12 @@ internal fun NotesPagesScreen(
             val folderNotes = cards.filter { it.columnId == folder?.id }.sortedByDescending { it.createdAt }
             val isSaved = page?.id == DEFAULT_SAVED_PAGE_ID
 
-            Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().background(folderWash(page?.let(::folderColor) ?: Color.Transparent, .17f))) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 18.dp, bottom = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    PageTitle(page?.name ?: "Inbox", deletable = page != null && pages.size > 1 && !isSaved && !privateOpen, onDelete = { page?.let(onDeletePage) }, modifier = Modifier.weight(1f))
+                    PageTitle(page?.name ?: "Inbox", deletable = page != null && pages.size > 1 && !isSaved && !privateOpen, onDelete = { page?.let(onDeletePage) }, onEdit = if (page != null && !privateOpen) ({ onRenamePage(page) }) else null, modifier = Modifier.weight(1f))
                     if (isSaved) {
                         GlassPill(ZenIcon.Picture, "Image", onPickImages)
                         Spacer(Modifier.width(8.dp))

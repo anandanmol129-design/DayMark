@@ -119,6 +119,7 @@ internal fun BoardScreen(
             onSelectPage = onSelectNotesPage,
             onNewPage = onNewPage,
             onDeletePage = onDeletePage,
+            onRenamePage = onRenamePage,
             onEditCard = onEditCard,
             onPickImages = onPickImages,
             onAddCard = onAddCard,

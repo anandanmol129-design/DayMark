@@ -41,7 +41,9 @@ data class BoardColumn(
 
 data class BoardPage(
     val id: String = UUID.randomUUID().toString(),
-    val name: String
+    val name: String,
+    /** Folder colour: an index into [HabitPalette], or -1 to pick one from the id. */
+    val color: Int = -1
 )
 
 data class BoardCard(
@@ -86,7 +88,9 @@ data class BoardCard(
     /** Habit colour: an index into [HabitPalette], or -1 to pick one from the id. */
     val habitColor: Int = -1,
     /** A habit that happens at a set time (an event) rather than something to tick off (a task). */
-    val habitEvent: Boolean = false
+    val habitEvent: Boolean = false,
+    /** The phone calendar event this card was copied to by [CalendarSync] (Daymark's own events and timed to-dos); null if none. */
+    val providerEventId: Long? = null
 )
 
 data class BoardSnapshot(
@@ -155,6 +159,7 @@ class BoardStore(context: Context) {
     fun save(snapshot: BoardSnapshot) {
         prefs.edit().putString("snapshot", encode(snapshot)).apply()
         runCatching { Reminders.sync(appContext, snapshot) }
+        runCatching { CalendarSync.schedulePush(appContext) }
     }
 
     /** Encodes and writes off the main thread, in order, so taps never wait on JSON or disk. */
@@ -209,7 +214,7 @@ private fun BoardColumn.toJson() = JSONObject().apply {
     put("id", id); put("workspace", workspace.id); put("name", name); put("pageId", pageId)
 }
 
-private fun BoardPage.toJson() = JSONObject().apply { put("id", id); put("name", name) }
+private fun BoardPage.toJson() = JSONObject().apply { put("id", id); put("name", name); put("color", color) }
 
 private fun BoardCard.toJson() = JSONObject().apply {
     put("id", id); put("workspace", workspace.id); put("columnId", columnId); put("kind", kind.id)
@@ -224,6 +229,7 @@ private fun BoardCard.toJson() = JSONObject().apply {
     put("checkIns", JSONArray().apply { checkIns.forEach { put(it) } })
     put("remind", remind); put("remindLeadMinutes", remindLeadMinutes)
     put("habitColor", habitColor); put("habitEvent", habitEvent)
+    put("providerEventId", providerEventId ?: JSONObject.NULL)
 }
 
 private fun JSONArray.toColumns() = (0 until length()).map { i ->
@@ -233,7 +239,7 @@ private fun JSONArray.toColumns() = (0 until length()).map { i ->
 
 private fun JSONArray.toPages() = (0 until length()).map { i ->
     val item = getJSONObject(i)
-    BoardPage(item.optString("id").ifBlank { UUID.randomUUID().toString() }, item.optString("name", "Page"))
+    BoardPage(item.optString("id").ifBlank { UUID.randomUUID().toString() }, item.optString("name", "Page"), item.optInt("color", -1).coerceIn(-1, HabitPalette.size - 1))
 }
 
 /**
@@ -383,6 +389,7 @@ private fun JSONArray.toCards() = (0 until length()).map { i ->
         remind = item.optString("remind").takeIf { it == REMIND_NOTIFY || it == REMIND_ALARM }.orEmpty(),
         remindLeadMinutes = item.optInt("remindLeadMinutes").coerceIn(0, 7 * 24 * 60),
         habitColor = item.optInt("habitColor", -1).coerceIn(-1, HabitPalette.size - 1),
-        habitEvent = item.optBoolean("habitEvent")
+        habitEvent = item.optBoolean("habitEvent"),
+        providerEventId = if (item.isNull("providerEventId")) null else item.optLong("providerEventId").takeIf { it > 0 }
     )
 }

@@ -97,7 +97,7 @@
         android:layout_marginTop="6dp"
         android:layout_marginEnd="6dp"
         android:layout_weight="1"
-        android:scaleType="fitCenter" />
+        android:scaleType="fitStart" />
 
     <TextView
         android:id="@+id/habit_empty"

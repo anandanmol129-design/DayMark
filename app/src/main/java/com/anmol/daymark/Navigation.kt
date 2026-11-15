@@ -147,15 +147,16 @@ internal fun PagerDot(active: Boolean, onClick: () -> Unit) {
 
 /** The page name; tapping it offers to delete the page (not for the last page or Saved). */
 @Composable
-internal fun PageTitle(name: String, deletable: Boolean, onDelete: () -> Unit, modifier: Modifier = Modifier, size: TextUnit = 26.sp) {
+internal fun PageTitle(name: String, deletable: Boolean, onDelete: () -> Unit, modifier: Modifier = Modifier, size: TextUnit = 26.sp, onEdit: (() -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
     Box(modifier) {
         Text(
             name, color = TodoText, fontSize = size, fontWeight = if (size > 30.sp) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(enabled = deletable) { menu = true }
+            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(enabled = deletable || onEdit != null) { menu = true }
         )
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("Delete page", color = Danger) }, onClick = { menu = false; onDelete() })
+            if (onEdit != null) DropdownMenuItem(text = { Text("Rename or recolour") }, onClick = { menu = false; onEdit() })
+            if (deletable) DropdownMenuItem(text = { Text("Delete page", color = Danger) }, onClick = { menu = false; onDelete() })
         }
     }
 }

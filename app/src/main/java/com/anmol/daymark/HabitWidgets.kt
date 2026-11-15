@@ -122,7 +122,6 @@ object HabitWidgets {
             val month = YearMonth.from(today)
             "${month.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} · ${checkInsIn(days, month.atDay(1).toEpochDay(), todayDay)} of ${today.dayOfMonth} days"
         }
-        views.setTextViewText(R.id.habit_sub, sub)
         val density = context.resources.displayMetrics.density
         views.setImageViewBitmap(R.id.habit_check, checkBitmap(density, checked, color))
         views.setContentDescription(R.id.habit_check, if (checked) "Undo today's check-in" else "Check in today")
@@ -133,10 +132,17 @@ object HabitWidgets {
         val widthDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH).takeIf { it > 0 } ?: if (year) 320 else 180
         val heightDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT).takeIf { it > 0 } ?: if (year) 140 else 180
         val gridW = (widthDp - 32).coerceAtLeast(80)
-        val gridH = (heightDp - 80).coerceAtLeast(40)
+        val gridH = (heightDp - 96).coerceAtLeast(40)
         // Cap the bitmap so it stays well under the widget memory limit.
         val scale = minOf(density, 900f / gridW)
-        val bitmap = if (year) yearBitmap(days, todayDay, color, gridW, gridH, scale) else monthBitmap(days, today, color, gridW, gridH, scale)
+        val stats = listOf(
+            "$streak" to "Streak",
+            "${bestStreak(habit.checkIns)}" to "Best",
+            "${checkInsIn(days, YearMonth.from(today).atDay(1).toEpochDay(), todayDay)}/${today.dayOfMonth}" to "This month"
+        )
+        val (bitmap, statsDrawn) = if (year) yearBitmap(days, todayDay, color, gridW, gridH, scale) to false else monthBitmap(days, today, color, gridW, gridH, scale, stats)
+        // When the stats sit beside the grid, the subtitle only needs the month name.
+        views.setTextViewText(R.id.habit_sub, if (statsDrawn) YearMonth.from(today).month.getDisplayName(TextStyle.FULL, Locale.getDefault()) else sub)
         views.setImageViewBitmap(R.id.habit_grid, bitmap)
         views.setOnClickPendingIntent(R.id.habit_grid, WidgetActions.openApp(context, widgetId, 7, WidgetActions.HABITS_OPEN))
         views.setOnClickPendingIntent(R.id.habit_title, WidgetActions.openApp(context, widgetId, 9, WidgetActions.HABITS_OPEN, habit.id))
@@ -210,8 +216,11 @@ object HabitWidgets {
         }
     }
 
-    /** This month as a calendar of squares, weeks starting Sunday, with weekday initials on top. */
-    private fun monthBitmap(days: Set<Long>, today: LocalDate, color: Int, wDp: Int, hDp: Int, scale: Float): Bitmap {
+    /**
+     * This month as a calendar of squares, weeks starting Sunday, with weekday initials on top. The grid sits on the left; when the
+     * widget is wide enough, [stats] fill the space on its right. Returns the bitmap and whether the stats were drawn.
+     */
+    private fun monthBitmap(days: Set<Long>, today: LocalDate, color: Int, wDp: Int, hDp: Int, scale: Float, stats: List<Pair<String, String>>): Pair<Bitmap, Boolean> {
         val w = (wDp * scale).toInt().coerceAtLeast(1)
         val h = (hDp * scale).toInt().coerceAtLeast(1)
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -223,11 +232,17 @@ object HabitWidgets {
         val rows = (lead + month.lengthOfMonth() + 6) / 7
         val labelH = 12 * scale
         val gapRatio = .18f
-        val cell = minOf(w / (7 + 6 * gapRatio), (h - labelH) / (rows + (rows - 1) * gapRatio))
+        val byHeight = ((h - labelH) / (rows + (rows - 1) * gapRatio)).coerceAtMost(40 * scale)
+        // Wide widgets put the stats on the right, like a calendar with a summary beside it.
+        val panelW = 96 * scale
+        val besideCell = minOf(byHeight, (w - panelW - 16 * scale) / (7 + 6 * gapRatio))
+        val side = besideCell >= 22 * scale
+        val cell = if (side) besideCell else minOf(w / (7 + 6 * gapRatio), byHeight)
         val gap = cell * gapRatio
         val gridW = cell * 7 + gap * 6
-        val left = (w - gridW) / 2
-        val top = labelH + ((h - labelH) - (cell * rows + gap * (rows - 1))) / 2
+        val left = if (side) 0f else (w - gridW) / 2
+        // Top-aligned under the subtitle; any spare height goes below.
+        val top = labelH
         val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
         text.textSize = 9 * scale
         text.color = MUTED
@@ -248,10 +263,28 @@ object HabitWidgets {
                 canvas.drawText("${i + 1}", x + cell / 2, y + cell / 2 - (text.descent() + text.ascent()) / 2, text)
             }
         }
-        return bitmap
+        if (side) {
+            // Stats stacked in the free space, spread over the grid's height.
+            val panelLeft = gridW + ((w - gridW) - panelW) / 2 + 8 * scale
+            val gridBottom = top + cell * rows + gap * (rows - 1)
+            val value = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 19 * scale; typeface = Typeface.DEFAULT_BOLD }
+            val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11 * scale; this.color = MUTED }
+            val blockH = 19 * scale + 15 * scale
+            val spacing = ((gridBottom - (top - labelH)) - blockH * stats.size) / (stats.size + 1)
+            stats.forEachIndexed { i, (v, l) ->
+                val y = top - labelH + spacing * (i + 1) + blockH * i
+                value.setColor(if (i == 0 && v != "0") color else 0xFFF1F1F2.toInt())
+                canvas.drawText(v, panelLeft, y + 19 * scale, value)
+                canvas.drawText(l, panelLeft, y + blockH, label)
+            }
+        }
+        return bitmap to side
     }
 
-    /** The past 53 weeks, a column per week with Sunday on top and this week on the right; month names above. */
+    /**
+     * The past 53 weeks, a column per week with Sunday on top and the newest week last; month names above. A tall widget wraps the
+     * weeks into two or three bands (oldest first) so the squares can grow and fill the space instead of sitting in a thin strip.
+     */
     private fun yearBitmap(days: Set<Long>, today: Long, color: Int, wDp: Int, hDp: Int, scale: Float): Bitmap {
         val w = (wDp * scale).toInt().coerceAtLeast(1)
         val h = (hDp * scale).toInt().coerceAtLeast(1)
@@ -260,30 +293,42 @@ object HabitWidgets {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val weeks = 53
         val labelH = 12 * scale
+        val bandGap = 6 * scale
         val gapRatio = .22f
-        val cell = minOf(w / (weeks + (weeks - 1) * gapRatio), (h - labelH) / (7 + 6 * gapRatio))
+        fun cellFor(bands: Int): Float {
+            val perBand = (weeks + bands - 1) / bands
+            return minOf(w / (perBand + (perBand - 1) * gapRatio), (h - bands * labelH - (bands - 1) * bandGap) / (bands * (7 + 6 * gapRatio)))
+        }
+        val bands = (1..3).maxBy { cellFor(it) }
+        val perBand = (weeks + bands - 1) / bands
+        val cell = cellFor(bands)
         val gap = cell * gapRatio
-        val gridW = cell * weeks + gap * (weeks - 1)
-        val gridH = cell * 7 + gap * 6
-        val left = (w - gridW) / 2
-        val top = labelH + ((h - labelH) - gridH) / 2
+        val gridW = cell * perBand + gap * (perBand - 1)
+        val bandH = labelH + cell * 7 + gap * 6
+        val left = 0f // Lines up with the title and subtitle above.
+        val firstTop = 0f
         val thisWeek = today - (LocalDate.ofEpochDay(today).dayOfWeek.value % 7)
         val start = thisWeek - (weeks - 1) * 7
         val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9 * scale; this.color = MUTED }
         val monthFormat = DateTimeFormatter.ofPattern("MMM", Locale.getDefault())
-        var lastLabelEnd = -1f
-        for (week in 0 until weeks) {
-            val weekStart = start + week * 7
-            val x = left + week * (cell + gap)
-            val date = LocalDate.ofEpochDay(weekStart)
-            if (date.dayOfMonth <= 7 && x > lastLabelEnd) {
-                val label = date.format(monthFormat)
-                if (x + text.measureText(label) <= w) { canvas.drawText(label, x, top - 4 * scale, text); lastLabelEnd = x + text.measureText(label) + 4 * scale }
-            }
-            for (d in 0 until 7) {
-                val day = weekStart + d
-                if (day > today) continue
-                square(canvas, paint, x, top + d * (cell + gap), cell, if (day in days) color else EMPTY, day == today, scale)
+        for (band in 0 until bands) {
+            val top = firstTop + band * (bandH + bandGap) + labelH
+            var lastLabelEnd = -1f
+            for (column in 0 until perBand) {
+                val week = band * perBand + column
+                if (week >= weeks) break
+                val weekStart = start + week * 7
+                val x = left + column * (cell + gap)
+                val date = LocalDate.ofEpochDay(weekStart)
+                if ((date.dayOfMonth <= 7 || column == 0) && x > lastLabelEnd) {
+                    val label = date.format(monthFormat)
+                    if (x + text.measureText(label) <= w) { canvas.drawText(label, x, top - 4 * scale, text); lastLabelEnd = x + text.measureText(label) + 4 * scale }
+                }
+                for (d in 0 until 7) {
+                    val day = weekStart + d
+                    if (day > today) continue
+                    square(canvas, paint, x, top + d * (cell + gap), cell, if (day in days) color else EMPTY, day == today, scale)
+                }
             }
         }
         return bitmap

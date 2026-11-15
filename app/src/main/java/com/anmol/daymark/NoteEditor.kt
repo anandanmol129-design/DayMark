@@ -145,16 +145,22 @@ internal fun NoteEditorSheet(
         }
     }
 
+    // A picked image goes through the crop page first; it hands back a stored path just like a plain copy.
+    var cropUri by rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
+    var cropForCover by rememberSaveable { mutableStateOf(false) }
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { Saves.copyImage(context, it) }?.let { path -> insert(NoteBlock(NoteBlocks.newId(), BlockKind.IMAGE, path)) }
+        if (uri != null) { cropForCover = false; cropUri = uri }
     }
 
     val pickCover = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { Saves.copyImage(context, it) }?.let { path ->
+        if (uri != null) { cropForCover = true; cropUri = uri }
+    }
+    fun usePicked(path: String) {
+        if (cropForCover) {
             // A cover picked and then swapped before saving is never stored, so drop it straight away.
             if (cover.isNotBlank() && cover != editing?.imagePath) runCatching { java.io.File(cover).delete() }
             cover = path
-        }
+        } else insert(NoteBlock(NoteBlocks.newId(), BlockKind.IMAGE, path))
     }
     fun chooseCover() = pickCover.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
 
@@ -321,6 +327,14 @@ internal fun NoteEditorSheet(
                 })
             )
         }
+    }
+    cropUri?.let { uri ->
+        ImageCropDialog(
+            uri = uri,
+            defaultAspect = if (cropForCover) CropAspect.Wide else CropAspect.Free,
+            onCancel = { cropUri = null },
+            onResult = { path -> cropUri = null; usePicked(path) }
+        )
     }
     if (showDoodle) {
         DoodleDialog(

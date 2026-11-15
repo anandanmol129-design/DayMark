@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,8 +45,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,6 +70,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -116,42 +121,46 @@ internal fun HabitsScreen(
     onAdd: () -> Unit
 ) {
     val today = LocalDate.now().toEpochDay()
-    var yearView by rememberSaveable { mutableStateOf(false) }
+    // Month and year are two pages side by side: swipe between them, or tap the toggle.
+    var savedPage by rememberSaveable { mutableIntStateOf(0) }
+    val pager = rememberPagerState(initialPage = savedPage) { 2 }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(pager.currentPage) { savedPage = pager.currentPage }
     val done = habits.count { it.checkedOn(today) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item(key = "header") {
-            Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp, bottom = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(todayLabel(), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
-                    SettingsButton()
-                }
-                Text("Habits", color = TodoText, fontSize = 34.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
-                Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        when { habits.isEmpty() -> "Small things, every day"; done == habits.size -> "All done today"; else -> "$done of ${habits.size} done today" },
-                        color = TodoMuted, fontSize = 15.sp, modifier = Modifier.weight(1f)
-                    )
-                    if (habits.isNotEmpty()) Row(Modifier.clip(RoundedCornerShape(12.dp)).background(TodoCard).padding(3.dp)) {
-                        Segment("Month", !yearView) { yearView = false }
-                        Segment("Year", yearView) { yearView = true }
-                    }
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp, bottom = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(todayLabel(), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+                SettingsButton()
+            }
+            Text("Habits", color = TodoText, fontSize = 34.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when { habits.isEmpty() -> "Small things, every day"; done == habits.size -> "All done today"; else -> "$done of ${habits.size} done today" },
+                    color = TodoMuted, fontSize = 15.sp, modifier = Modifier.weight(1f)
+                )
+                if (habits.isNotEmpty()) Row(Modifier.clip(RoundedCornerShape(12.dp)).background(TodoCard).padding(3.dp)) {
+                    Segment("Month", pager.targetPage == 0) { scope.launch { pager.animateScrollToPage(0) } }
+                    Segment("Year", pager.targetPage == 1) { scope.launch { pager.animateScrollToPage(1) } }
                 }
             }
         }
         if (habits.isEmpty()) {
-            item(key = "empty") {
-                Column(Modifier.fillMaxWidth().padding(top = 90.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Glyph(ZenIcon.Habit, TodoMuted, 40.dp)
-                    Text("No habits yet", color = TodoText, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
-                    Text("Tap + to start one", color = TodoMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-                    Spacer(Modifier.height(16.dp))
-                    GlassPill(ZenIcon.Plus, "New habit", onAdd)
-                }
+            Column(Modifier.fillMaxWidth().padding(top = 80.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Glyph(ZenIcon.Habit, TodoMuted, 40.dp)
+                Text("No habits yet", color = TodoText, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
+                Text("Tap + to start one", color = TodoMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+                Spacer(Modifier.height(16.dp))
+                GlassPill(ZenIcon.Plus, "New habit", onAdd)
             }
-        }
-        items(habits, key = { it.id }) { habit ->
-            Box(Modifier.animateItem().padding(horizontal = 14.dp, vertical = 6.dp)) {
-                HabitCard(habit, today, yearView, onToggleDay = { onToggleDay(habit, it) }, onEdit = { onEdit(habit) }, onDelete = { onDelete(habit) })
+        } else HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { it }) { page ->
+            val yearView = page == 1
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
+                items(habits, key = { it.id }) { habit ->
+                    Box(Modifier.animateItem().padding(horizontal = 14.dp, vertical = 6.dp)) {
+                        HabitCard(habit, today, yearView, onToggleDay = { onToggleDay(habit, it) }, onEdit = { onEdit(habit) }, onDelete = { onDelete(habit) })
+                    }
+                }
             }
         }
     }

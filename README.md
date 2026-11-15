@@ -25,11 +25,11 @@
 
 **Today** opens first: what's overdue, what's on today in time order, the habits you haven't checked in yet, and what's coming tomorrow.
 
-**To-dos** live in folders (Inbox, Work, Home…). Add them by typing or by voice, star the important ones, give them a date and time, and let them repeat daily, on weekdays, weekly, monthly or yearly.
+**To-dos** live in folders (Inbox, Work, Home…), each with its own colour. Add them by typing or by voice, star the important ones, give them a date and time, and let them repeat daily, on weekdays, weekly, monthly or yearly.
 
-**Calendar** shows a week strip and a timeline of the day, with tasks, events and habits together. Swipe between days, and import events from the calendars already on your phone.
+**Calendar** shows a week strip and a timeline of the day, with tasks, events and habits together. Swipe between days, and pick which of your phone's calendars to show. Sync is two-way through Android's own calendar storage: events you make in Daymark (and, if you like, timed to-dos) are copied to one calendar you choose, such as your Google calendar, and edits go both ways. No Google sign-in is needed.
 
-**Notes** are written as pages: headings, checklists, bullets, quotes, tables, images and drawings, with an optional cover image. Notes can be kept in folders.
+**Notes** are written as pages: headings, checklists, bullets, quotes, tables, images and drawings, with an optional cover image. Crop a picture before you add it, or use it as it is. Notes can be kept in colour-coded folders.
 
 **Saved** collects links, text and images shared from other apps through the Android share sheet. Links get their title and preview image, and you can add a comment of your own to anything you save.
 
@@ -67,13 +67,13 @@ Nine home-screen widgets:
 
 - Search across everything from any tab.
 - Undo after any delete.
-- Back up to a single file and restore it on another phone.
+- Back up to a single file, share it to Drive, email or any app, and restore it on another phone.
 
 ## Privacy
 
 Daymark has no account, no analytics and no ads. Your data is stored in the app's private storage on your phone and nowhere else.
 
-The app uses the internet for one thing only: fetching the title and preview image of a link you save. It asks for calendar access only when you choose to import events.
+The app uses the internet for one thing only: fetching the title and preview image of a link you save. It asks for calendar access only when you choose calendars to show or turn on sync.
 
 ## Install
 
@@ -101,6 +101,7 @@ The app is written in Kotlin with Jetpack Compose. The sources are in `app/src/m
 | Data model and storage | `BoardModels.kt`, `Backup.kt` |
 | Screens | `Today.kt`, `TodoScreens.kt`, `CalendarScreen.kt`, `NotesScreens.kt`, `NoteEditor.kt`, `SavedGrid.kt`, `Habits.kt`, `SettingsScreen.kt`, `Search.kt` |
 | Reminders and alarms | `Reminders.kt`, `AlarmRinging.kt`, `ReminderSettings.kt` |
+| Calendar sync | `CalendarSync.kt`, `CalendarSettings.kt` |
 | Widgets | `TaskListWidget.kt`, `TaskCompactWidget.kt`, `MonthWidget.kt`, `CalendarWidget.kt`, `NoteWidget.kt`, `HabitWidgets.kt` |
 | Look and feel | `Theme.kt`, `Glass.kt`, `Backdrops.kt`, `Icons.kt`, `Motion.kt` |
 
