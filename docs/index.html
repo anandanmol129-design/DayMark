@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daymark</title>
+<meta name="description" content="A calm, private planner for Android: to-dos, calendar, notes and habits in one place. Everything stays on your phone.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #141413; --bg2: #1c201e; --card: rgba(255,255,255,.05); --line: rgba(255,255,255,.09);
+    --text: #edeae3; --muted: #a39f96; --sage: #9dbbab; --sage-deep: #7fa595; --sand: #d9bc8c; --cream: #ede6d6;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background-image: radial-gradient(1000px 600px at 15% -10%, #2a3530 0%, transparent 60%), radial-gradient(800px 500px at 100% 30%, #2a261f 0%, transparent 60%);
+    background-repeat: no-repeat;
+  }
+  a { color: var(--sage); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 22px 0; }
+  header img { width: 36px; height: 36px; }
+  header b { font-size: 19px; letter-spacing: .2px; }
+  header nav { margin-left: auto; display: flex; gap: 22px; font-size: 15px; }
+  header nav a { color: var(--muted); text-decoration: none; }
+  header nav a:hover { color: var(--text); }
+  .hero { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; padding: 40px 0 70px; }
+  h1 { font-size: clamp(38px, 6vw, 60px); line-height: 1.05; margin: 0 0 18px; letter-spacing: -1px; }
+  h1 em { font-style: normal; color: var(--sand); }
+  .lede { color: var(--muted); font-size: 19px; max-width: 34em; margin: 0 0 28px; }
+  .cta { display: inline-flex; align-items: center; gap: 10px; background: var(--sage-deep); color: #10160f; font-weight: 600;
+         padding: 14px 22px; border-radius: 16px; text-decoration: none; }
+  .cta:hover { background: var(--sage); }
+  .meta { color: var(--muted); font-size: 14px; margin-top: 14px; }
+  .phones { position: relative; height: 560px; }
+  .phones img { position: absolute; width: 250px; border-radius: 28px; border: 1px solid var(--line); box-shadow: 0 30px 60px rgba(0,0,0,.5); }
+  .phones img:first-child { left: 0; top: 40px; transform: rotate(-4deg); }
+  .phones img:last-child { right: 0; top: 0; transform: rotate(3deg); }
+  section { padding: 60px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 32px; margin: 0 0 8px; letter-spacing: -.5px; }
+  .sub { color: var(--muted); margin: 0 0 34px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 22px; }
+  .card h3 { margin: 0 0 6px; font-size: 18px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 2px; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+  .split ul { padding-left: 20px; color: var(--muted); }
+  .split li { margin: 8px 0; }
+  .split li b { color: var(--text); font-weight: 600; }
+  .shots { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 10px; scroll-snap-type: x mandatory; }
+  .shots img { width: 220px; flex: none; border-radius: 22px; border: 1px solid var(--line); scroll-snap-align: start; }
+  .widgets { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .widgets img { max-width: 100%; border-radius: 24px; }
+  ol.steps { color: var(--muted); padding-left: 22px; }
+  ol.steps li { margin: 10px 0; }
+  footer { padding: 40px 0 60px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+  @media (max-width: 820px) {
+    .hero, .split { grid-template-columns: 1fr; }
+    .phones { height: 440px; max-width: 420px; margin: 0 auto; width: 100%; }
+    .phones img { width: 190px; }
+    .grid { grid-template-columns: 1fr; }
+    header nav { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="icon.svg" alt="">
+    <b>Daymark</b>
+    <nav><a href="#features">Features</a><a href="#habits">Habits</a><a href="#privacy">Privacy</a><a href="#install">Install</a></nav>
+  </header>
+
+  <div class="hero">
+    <div>
+      <h1>Plan the day.<br><em>Keep it yours.</em></h1>
+      <p class="lede">Daymark is a calm planner for Android. To-dos, calendar, notes and habits live in one quiet app, and everything stays on your phone.</p>
+      <a class="cta" id="download" href="../../releases/latest">Download for Android</a>
+      <div class="meta">Free · Android 12 or newer · No account</div>
+    </div>
+    <div class="phones">
+      <img src="screenshots/today.png" alt="The Today screen">
+      <img src="screenshots/habits.png" alt="The Habits screen">
+    </div>
+  </div>
+
+  <section id="features">
+    <h2>Everything for the day, nothing extra</h2>
+    <p class="sub">Five tabs, one plus button, and a soft frosted-glass look.</p>
+    <div class="grid">
+      <div class="card"><h3><span class="dot" style="background:#ede6d6"></span>Today</h3><p>What's overdue, what's on today in time order, your habits, and what's coming tomorrow.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#9dbbab"></span>To-dos</h3><p>Folders, priorities, voice capture, due dates and repeats from daily to yearly.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#6fa8dc"></span>Calendar</h3><p>A week strip and a day timeline. Swipe between days and import your phone's calendars.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#d9bc8c"></span>Notes</h3><p>Pages with headings, checklists, tables, images and drawings, plus a cover image.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#e48ab8"></span>Saved</h3><p>Share links, text and images from any app. Links get a title and preview, and you can comment on them.</p></div>
+      <div class="card"><h3><span class="dot" style="background:#a48bdb"></span>Private</h3><p>Hold Notes to open a section locked by your fingerprint, face or screen lock.</p></div>
+    </div>
+  </section>
+
+  <section id="habits">
+    <div class="split">
+      <div>
+        <h2>Habits you can see</h2>
+        <p class="sub">Every day you show up becomes a coloured square.</p>
+        <ul>
+          <li><b>Task or event.</b> Tick it off whenever, or give it a set time and duration on your calendar.</li>
+          <li><b>Eight colours.</b> Each habit wears its own, from the check button to its streak.</li>
+          <li><b>Month and year views.</b> A calendar of squares, or a whole year like a contribution graph.</li>
+          <li><b>Streaks.</b> Your current run and your best, in the app and on your home screen.</li>
+          <li><b>Reminders.</b> A notification or an alarm, only on days you haven't checked in.</li>
+        </ul>
+      </div>
+      <div class="shots">
+        <img src="screenshots/habits.png" alt="Habits in month view">
+        <img src="screenshots/habits_year.png" alt="Habits in year view">
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>On your home screen</h2>
+    <p class="sub">Nine widgets: tasks, calendar month, events, a pinned note, and habit month and year with a one-tap check-in.</p>
+    <div class="widgets">
+      <img src="screenshots/widget_month.png" width="300" alt="Habit month widget">
+      <img src="screenshots/widget_year.png" width="420" alt="Habit year widget">
+    </div>
+  </section>
+
+  <section>
+    <h2>Reminders that actually arrive</h2>
+    <p class="sub">Any task, event or habit can send a notification with Done and Snooze, or ring like an alarm clock on the lock screen. Reminders come back after a restart, and Daymark tells you when a phone setting would block them.</p>
+    <div class="shots">
+      <img src="screenshots/today.png" alt="Today">
+      <img src="screenshots/inbox.png" alt="To-dos">
+      <img src="screenshots/calendar.png" alt="Calendar">
+      <img src="screenshots/notes.png" alt="Notes">
+    </div>
+  </section>
+
+  <section id="privacy">
+    <h2>Private by design</h2>
+    <p class="sub" style="max-width:44em">No account, no analytics, no ads. Your data is stored in the app's private storage on your phone and nowhere else. Daymark goes online for one thing only: fetching the title and picture of a link you save. Back up to a single file whenever you like, and restore it on a new phone.</p>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <ol class="steps">
+      <li>On your Android phone, open the <a href="../../releases/latest">latest release</a> and download the <code>.apk</code> file.</li>
+      <li>Open it. If Android asks, allow your browser or file manager to install apps.</li>
+      <li>To update later, install the newer APK over the old one. Your data stays.</li>
+    </ol>
+  </section>
+
+  <footer>Daymark · <a href="../../">Source on GitHub</a></footer>
+</div>
+<script>
+  // On GitHub Pages (owner.github.io/repo/) point the download and source links at the repository.
+  (function () {
+    var m = location.hostname.match(/^([^.]+)\.github\.io$/);
+    var repo = location.pathname.split('/').filter(Boolean)[0];
+    if (!m || !repo) return;
+    var base = 'https://github.com/' + m[1] + '/' + repo;
+    document.querySelectorAll('a[href^="../../"]').forEach(function (a) {
+      a.href = base + '/' + a.getAttribute('href').replace('../../', '');
+    });
+  })();
+</script>
+</body>
+</html>

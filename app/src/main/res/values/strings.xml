@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Daymark</string>
+    <string name="widget_description">Your suggested next to-do, in one glance</string>
+    <string name="widget_tasks_description">Detailed task list for one folder, with tick-to-complete and quick add</string>
+    <string name="widget_tasks_compact_description">Slim, dense list of open tasks from one folder. Tap a task for a quick sheet</string>
+    <string name="widget_month_compact_description">Small month grid with today highlighted and dots on days with plans</string>
+    <string name="widget_month_detailed_description">Month grid with month arrows, plus the selected day\'s plans and quick add</string>
+    <string name="widget_events_compact_description">Today\'s date and your next few events, one line each</string>
+    <string name="widget_events_detailed_description">Scrolling agenda for the next 7 days, grouped by day</string>
+    <string name="widget_habit_month_description">One habit\'s month as coloured squares, with its streak and a tap to check in</string>
+    <string name="widget_habit_year_description">One habit\'s past year as a grid of coloured squares, with its streak</string>
+    <string name="widget_note_description">Keep one note on your home screen</string>
+</resources>

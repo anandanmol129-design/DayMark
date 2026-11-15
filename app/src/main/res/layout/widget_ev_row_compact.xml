@@ -1,0 +1,38 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ev_row"
+    android:layout_width="match_parent"
+    android:layout_height="28dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="14dp"
+    android:paddingEnd="12dp">
+
+    <ImageView
+        android:id="@+id/ev_dot"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:importantForAccessibility="no"
+        android:src="@drawable/widget_dot" />
+
+    <TextView
+        android:id="@+id/ev_time"
+        android:layout_width="74dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:ellipsize="end"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textColor="#FFC4C9DC"
+        android:textSize="11sp" />
+
+    <TextView
+        android:id="@+id/ev_row_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textColor="#FFF1F1F2"
+        android:textSize="14sp" />
+</LinearLayout>

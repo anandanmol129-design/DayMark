@@ -1,0 +1,25 @@
+<resources>
+    <!-- Dark window behind the first frame so launching never flashes grey. -->
+    <style name="Theme.Daymark" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/daymark_window</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@style/Daymark.WindowAnimations</item>
+    </style>
+
+    <!-- Transparent window for the widget quick sheet; the dimming scrim is drawn by the sheet itself. -->
+    <style name="Theme.Daymark.Sheet" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <style name="Daymark.WindowAnimations" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/daymark_open_enter</item>
+        <item name="android:activityCloseExitAnimation">@anim/daymark_close_exit</item>
+        <item name="android:taskOpenEnterAnimation">@anim/daymark_open_enter</item>
+        <item name="android:taskCloseExitAnimation">@anim/daymark_close_exit</item>
+    </style>
+</resources>

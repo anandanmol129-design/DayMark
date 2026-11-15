@@ -1,0 +1,7 @@
+<!-- Daymark mark: a tick in a rounded square, in the app's accent blue. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28dp" android:height="28dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF9DB8FF" android:pathData="M6,2h12a4,4 0,0 1,4 4v12a4,4 0,0 1,-4 4h-12a4,4 0,0 1,-4 -4v-12a4,4 0,0 1,4 -4z" />
+    <path android:strokeColor="#FF161B2E" android:strokeWidth="2.4" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M7.2,12.4l3.2,3.2l6.4,-7" />
+</vector>

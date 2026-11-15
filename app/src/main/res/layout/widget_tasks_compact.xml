@@ -1,0 +1,96 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_tasks_background"
+    android:clipToOutline="true"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/widget_tasks_header"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="4dp">
+
+        <ImageView
+            android:id="@+id/widget_open"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="Open Daymark"
+            android:padding="6dp"
+            android:src="@drawable/ic_widget_daymark" />
+
+        <LinearLayout
+            android:id="@+id/widget_folder"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:contentDescription="Choose list"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
+
+            <TextView
+                android:id="@+id/widget_folder_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Inbox"
+                android:textColor="#FF9DB8FF"
+                android:textSize="15sp" />
+
+            <ImageView
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginStart="4dp"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_widget_chevron" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/widget_add"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:contentDescription="Add task">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:background="@drawable/widget_add_background"
+                android:importantForAccessibility="no"
+                android:padding="5dp"
+                android:src="@drawable/ic_widget_add" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <ListView
+            android:id="@+id/widget_tasks"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:divider="@null"
+            android:paddingTop="2dp"
+            android:paddingBottom="6dp"
+            android:scrollbars="none" />
+
+        <TextView
+            android:id="@+id/widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:maxLines="1"
+            android:text="No tasks"
+            android:textColor="#FF8A90A6"
+            android:textSize="13sp" />
+    </FrameLayout>
+</LinearLayout>

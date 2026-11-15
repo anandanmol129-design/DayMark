@@ -1,0 +1,82 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+   
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_tasks_background"
+    android:clipToOutline="true"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/widget_tasks_header"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="4dp">
+
+        <ImageView
+            android:id="@+id/ev_open"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="Open calendar"
+            android:padding="6dp"
+            android:src="@drawable/ic_widget_daymark" />
+
+        <TextView
+            android:id="@+id/ev_title"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="center_vertical"
+            android:maxLines="1"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="Next 7 days"
+            android:textColor="#FF9DB8FF"
+            android:textSize="15sp" />
+
+        <FrameLayout
+            android:id="@+id/ev_add"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:contentDescription="Add event">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:background="@drawable/widget_add_background"
+                android:importantForAccessibility="no"
+                android:padding="5dp"
+                android:src="@drawable/ic_widget_add" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:paddingTop="2dp">
+        <TextView android:layout_width="match_parent" android:layout_height="28dp" android:gravity="bottom" android:paddingStart="14dp" android:paddingBottom="2dp" android:text="Today" android:textColor="#FF9DB8FF" android:textSize="12sp" android:textStyle="bold" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="14dp" android:paddingEnd="12dp">
+            <ImageView android:layout_width="8dp" android:layout_height="8dp" android:src="@drawable/widget_dot" android:tint="#FF3A7BE8" />
+            <TextView android:layout_width="66dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:maxLines="1" android:text="9:00 AM" android:textColor="#FFC4C9DC" android:textSize="12sp" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:text="Team sync" android:textColor="#FFF1F1F2" android:textSize="14sp" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="14dp" android:paddingEnd="12dp">
+            <ImageView android:layout_width="8dp" android:layout_height="8dp" android:src="@drawable/widget_dot" android:tint="#FF2BC4A0" />
+            <TextView android:layout_width="66dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:maxLines="1" android:text="6:30 PM" android:textColor="#FFC4C9DC" android:textSize="12sp" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:text="Dinner with Sam" android:textColor="#FFF1F1F2" android:textSize="14sp" />
+        </LinearLayout>
+        <TextView android:layout_width="match_parent" android:layout_height="28dp" android:gravity="bottom" android:paddingStart="14dp" android:paddingBottom="2dp" android:text="Tomorrow" android:textColor="#FF9DB8FF" android:textSize="12sp" android:textStyle="bold" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="14dp" android:paddingEnd="12dp">
+            <ImageView android:layout_width="8dp" android:layout_height="8dp" android:src="@drawable/widget_dot" android:tint="#FFE6B422" />
+            <TextView android:layout_width="66dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:maxLines="1" android:text="All day" android:textColor="#FFC4C9DC" android:textSize="12sp" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:text="Anna&#8217;s birthday" android:textColor="#FFF1F1F2" android:textSize="14sp" />
+        </LinearLayout>
+        <TextView android:layout_width="match_parent" android:layout_height="28dp" android:gravity="bottom" android:paddingStart="14dp" android:paddingBottom="2dp" android:text="Mon 16" android:textColor="#FF9DB8FF" android:textSize="12sp" android:textStyle="bold" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="34dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="14dp" android:paddingEnd="12dp">
+            <ImageView android:layout_width="8dp" android:layout_height="8dp" android:src="@drawable/widget_dot" android:tint="#FF7A4CFF" />
+            <TextView android:layout_width="66dp" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:maxLines="1" android:text="10:00 AM" android:textColor="#FFC4C9DC" android:textSize="12sp" />
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:text="Design review" android:textColor="#FFF1F1F2" android:textSize="14sp" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
