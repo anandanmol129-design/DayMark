@@ -1,13 +1,16 @@
 package com.anmol.daymark
 
-import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,8 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.SnackbarHost
@@ -39,17 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.ui.draw.scale
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -70,8 +64,7 @@ internal fun SettingsScreen(
     onShareBackup: () -> Unit,
     onRestore: () -> Unit,
     onImportCalendar: () -> Unit,
-    backdrop: Backdrop,
-    onBackdrop: (Backdrop) -> Unit
+    onOpenStorage: () -> Unit
 ) {
     val context = LocalContext.current
     val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
@@ -93,7 +86,7 @@ internal fun SettingsScreen(
             .drawBehind {
                 drawRect(TodoBackground)
                 blurred?.let { drawBlurred(it) }
-                drawRect(Color(0x590B1226))
+                drawRect(PageTint)
             }
             // Swallow taps so they don't reach the tab underneath.
             .pointerInput(Unit) { detectTapGestures { } }
@@ -111,8 +104,13 @@ internal fun SettingsScreen(
                 }
             }
             item {
-                Text("BACKGROUND", color = TodoMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.padding(start = 6.dp, bottom = 6.dp))
-                BackdropPicker(selected = backdrop, onSelect = onBackdrop)
+                SettingsSection("Appearance") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(36.dp)) { Glyph(ZenIcon.Sun, TodoBlue, 20.dp) }
+                        Text("Theme", color = TodoText, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        PillChoice(listOf(true to "Light", false to "Dark"), Look.light) { Look.setLight(context, it) }
+                    }
+                }
             }
             item {
                 SettingsSection("Backup") {
@@ -123,9 +121,15 @@ internal fun SettingsScreen(
                     SettingsRow(ZenIcon.Restore, "Restore from backup", "Replaces everything with a backup file", enabled = !busy, onClick = onRestore)
                 }
                 Text(
-                    if (busy) "Working…" else "Backups are a single .zip with all your pages, tasks, notes and images. Keep one somewhere safe, like Drive or Downloads.",
+                    if (busy) "Working…" else "Backups are a single .zip with all your pages, tasks, notes, pictures and files. Keep one somewhere safe, like Drive or Downloads.",
                     color = TodoMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 8.dp)
                 )
+            }
+            item { AutoBackupSettings(snapshot, snackbar) }
+            item {
+                SettingsSection("Storage") {
+                    SettingsRow(ZenIcon.HardDrive, "Manage storage", "${formatBytes(imageBytes)} of pictures and files · free up space", onClick = onOpenStorage)
+                }
             }
             item {
                 SettingsSection("Calendar") {
@@ -139,7 +143,7 @@ internal fun SettingsScreen(
                     SettingsStat("Notes & saves", "$notes in ${snapshot.notesPages.size} folder${if (snapshot.notesPages.size == 1) "" else "s"}")
                     SettingsStat("Events", events.toString())
                     SettingsStat("Habits & timers", tracked.toString())
-                    SettingsStat("Images", formatBytes(imageBytes))
+                    SettingsStat("Pictures & files", formatBytes(imageBytes))
                 }
             }
             item {
@@ -154,27 +158,18 @@ internal fun SettingsScreen(
     }
 }
 
-/** Live mini previews of each background; tap one to switch. */
+/** A row of pill options with the chosen one filled, like "Off · Daily · Weekly". */
 @Composable
-private fun BackdropPicker(selected: Backdrop, onSelect: (Backdrop) -> Unit) {
-    val clock = rememberBackdropClock()
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(horizontal = 2.dp)) {
-        items(Backdrop.entries) { scene ->
-            val active = scene == selected
-            val ring by animateColorAsState(if (active) CalendarBlue else Color(0x33FFFFFF), tween(220), label = "backdropRing")
-            val lift by animateFloatAsState(if (active) 1f else .94f, spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "backdropLift")
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.scale(lift)) {
-                Box(
-                    Modifier.size(width = 84.dp, height = 140.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .border(BorderStroke(if (active) 2.5.dp else 1.dp, ring), RoundedCornerShape(18.dp))
-                        .clickable { onSelect(scene) }
-                ) {
-                    Canvas(Modifier.fillMaxSize()) { drawBackdrop(scene, if (scene == Backdrop.STILL) 0f else clock.value) }
-                    if (active) Glyph(ZenIcon.Check, Color.White, 14.dp, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clip(CircleShape).background(CalendarBlue).padding(horizontal = 6.dp, vertical = 1.dp))
-                }
-                Text(scene.label, color = if (active) TodoText else TodoMuted, fontSize = 12.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(top = 6.dp))
-            }
+private fun <T> PillChoice(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+    Row(Modifier.clip(RoundedCornerShape(50)).background(TodoCardRaised).padding(3.dp)) {
+        options.forEach { (value, label) ->
+            val active = value == selected
+            Text(
+                label, color = if (active) OnAccent else TodoMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clip(RoundedCornerShape(50)).background(if (active) TodoBlue else Color.Transparent)
+                    .clickable { onSelect(value) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
     }
 }
@@ -214,5 +209,73 @@ private fun SettingsStat(label: String, value: String) {
 
 @Composable
 internal fun SettingsDivider() {
-    Box(Modifier.fillMaxWidth().padding(start = 50.dp).height(1.dp).background(Color(0x1FFFFFFF)))
+    Box(Modifier.fillMaxWidth().padding(start = 50.dp).height(1.dp).background(veil(0.12f)))
+}
+
+/** Settings › Automatic backup: a folder to write to, how often, and how the last run went. */
+@Composable
+private fun AutoBackupSettings(snapshot: BoardSnapshot, snackbar: SnackbarHostState) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var refresh by remember { mutableIntStateOf(0) }
+    var every by remember { mutableIntStateOf(AutoBackup.everyDays(context)) }
+    var running by remember { mutableStateOf(false) }
+    val folderName by produceState<String?>(null, refresh) { value = withContext(Dispatchers.IO) { AutoBackup.folderName(context) } }
+    val hasFolder = remember(refresh) { AutoBackup.folder(context) != null }
+    val last = remember(refresh) { AutoBackup.lastMillis(context) }
+    val error = remember(refresh) { AutoBackup.lastError(context) }
+
+    fun message(text: String) = scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(text) }
+    fun backUpNow() {
+        running = true
+        val current = snapshot
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { AutoBackup.runNow(context, current) } }
+            running = false
+            refresh++
+            result.onSuccess { message("Saved $it") }.onFailure { message(it.message ?: "Backup failed") }
+        }
+    }
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching { AutoBackup.setFolder(context, uri) }
+            .onSuccess { every = AutoBackup.everyDays(context); refresh++; backUpNow() }
+            .onFailure { message("Daymark can’t write to that folder. Try another one.") }
+    }
+
+    SettingsSection("Automatic backup") {
+        SettingsRow(
+            ZenIcon.Folder, if (hasFolder) "Backup folder" else "Choose a backup folder",
+            when {
+                !hasFolder -> "On your phone, SD card or a cloud folder"
+                folderName != null -> folderName!!
+                else -> "Folder not available · choose it again"
+            },
+            onClick = { pickFolder.launch(null) }
+        )
+        SettingsDivider()
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(36.dp)) { Glyph(ZenIcon.Repeat, TodoBlue, 20.dp) }
+            Text("How often", color = TodoText, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            PillChoice(listOf(0 to "Off", 1 to "Daily", 7 to "Weekly"), every) { days ->
+                if (days != 0 && !hasFolder) { pickFolder.launch(null); return@PillChoice }
+                every = days
+                AutoBackup.setEveryDays(context, days)
+                refresh++
+            }
+        }
+        if (hasFolder) {
+            SettingsDivider()
+            SettingsRow(ZenIcon.Upload, "Back up to folder now", if (running) "Working…" else "Writes today’s backup there", enabled = !running, onClick = ::backUpNow)
+        }
+    }
+    val status = when {
+        error != null -> error
+        every == 0 && hasFolder -> "Automatic backup is off. Choose Daily or Weekly to turn it on."
+        every == 0 || !hasFolder -> "Pick a folder and Daymark backs up on its own, keeping the latest ${AutoBackup.KEEP} backups there and removing older ones."
+        last == 0L -> "No automatic backup yet. Keeps the latest ${AutoBackup.KEEP}."
+        else -> "Last automatic backup " + java.time.Instant.ofEpochMilli(last).atZone(java.time.ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("d MMM, h:mm a", Locale.getDefault())) + " · keeps the latest ${AutoBackup.KEEP}"
+    }
+    Text(status, color = if (error != null) Danger else TodoMuted, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 8.dp))
 }

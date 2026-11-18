@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Surface
@@ -31,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.translate
@@ -41,7 +41,6 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
@@ -59,7 +58,8 @@ import androidx.compose.ui.unit.sp
 internal val LocalBackdrop = staticCompositionLocalOf<GraphicsLayer?> { null }
 
 @Composable
-internal fun GlassBackdrop(backdrop: Backdrop, content: @Composable () -> Unit) {
+internal fun GlassBackdrop(content: @Composable () -> Unit) {
+    val light = Look.light
     val sharp = rememberGraphicsLayer()
     val blurred = rememberGraphicsLayer().apply {
         renderEffect = BlurEffect(48f / BlurDownscale, 48f / BlurDownscale, TileMode.Clamp)
@@ -75,23 +75,32 @@ internal fun GlassBackdrop(backdrop: Backdrop, content: @Composable () -> Unit) 
             }
         }
     }) {
-        // Record the scene once per frame; glass panels reuse the blurred copy without redrawing.
-        Box(
-            Modifier.fillMaxSize().drawWithContent {
-                sharp.record { this@drawWithContent.drawContent() }
-                // Blur a small copy: it looks the same once blurred and costs far less every frame.
-                blurred.record(IntSize((size.width / BlurDownscale).toInt().coerceAtLeast(1), (size.height / BlurDownscale).toInt().coerceAtLeast(1))) {
-                    scale(1f / BlurDownscale, 1f / BlurDownscale, pivot = Offset.Zero) { drawLayer(sharp) }
-                }
-                drawLayer(sharp)
+        if (light) {
+            // Material surfaces sit on a calm cream; a soft pool of the tab's colour glows in from the top.
+            Canvas(Modifier.fillMaxSize()) {
+                drawRect(TodoBackground)
+                val wash = Look.accent.container
+                val centre = Offset(size.width * .85f, 0f)
+                drawCircle(Brush.radialGradient(listOf(wash, wash.copy(alpha = 0f)), centre, size.width * 1.1f), size.width * 1.1f, centre)
             }
-        ) {
-            Crossfade(targetState = backdrop, animationSpec = tween(700), label = "backdrop") { scene ->
-                val clock = rememberBackdropClock(running = scene != Backdrop.STILL, paused = { SystemClock.uptimeMillis() - lastTouch[0] < 1500 })
-                Canvas(Modifier.fillMaxSize()) { drawBackdrop(scene, clock.value) }
+        } else {
+            // Record the scene once per frame; glass panels reuse the blurred copy without redrawing.
+            Box(
+                Modifier.fillMaxSize().drawWithContent {
+                    sharp.record { this@drawWithContent.drawContent() }
+                    // Blur a small copy: it looks the same once blurred and costs far less every frame.
+                    blurred.record(IntSize((size.width / BlurDownscale).toInt().coerceAtLeast(1), (size.height / BlurDownscale).toInt().coerceAtLeast(1))) {
+                        scale(1f / BlurDownscale, 1f / BlurDownscale, pivot = Offset.Zero) { drawLayer(sharp) }
+                    }
+                    drawLayer(sharp)
+                }
+            ) {
+                val clock = rememberBackdropClock(paused = { SystemClock.uptimeMillis() - lastTouch[0] < 1500 })
+                Canvas(Modifier.fillMaxSize()) { drawBackdrop(clock.value) }
             }
         }
-        CompositionLocalProvider(LocalBackdrop provides blurred) { content() }
+        // The content stays in one place whichever look is showing, so flipping the theme keeps its state.
+        CompositionLocalProvider(LocalBackdrop provides if (light) null else blurred) { content() }
     }
 }
 

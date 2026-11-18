@@ -38,15 +38,11 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Compact task list: a slim header (page name with a picker, quick add) over plain one-line rows.
+ * The Tasks widget's compact view: a slim header (page name with settings, quick add) over plain one-line rows.
  * Tapping a row opens [QuickTaskActivity] over the home screen instead of launching the app.
  */
-class TaskCompactWidgetProvider : DaymarkWidget() {
-    override fun onDeleted(context: Context, widgetIds: IntArray) {
-        widgetIds.forEach { TaskListWidgetProvider.setFolder(context, it, null) }
-    }
-
-    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews {
+object TaskCompactWidget {
+    fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews {
         val page = snapshot.todoPages.firstOrNull { it.id == TaskListWidgetProvider.folderFor(context, widgetId) } ?: snapshot.todoPages.first()
         val columns = snapshot.columnsFor(page)
         val firstColumn = columns.firstOrNull()
@@ -59,7 +55,7 @@ class TaskCompactWidgetProvider : DaymarkWidget() {
         // Headings only help once tasks are spread over more than the first column.
         val showHeadings = groups.any { it.first.id != firstColumn?.id }
 
-        val views = RemoteViews(context.packageName, R.layout.widget_tasks_compact)
+        val views = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_tasks_compact))
         views.setTextViewText(R.id.widget_folder_name, page.name)
         views.setOnClickPendingIntent(R.id.widget_open, WidgetActions.openApp(context, widgetId, 0, WidgetActions.TASKS_OPEN, page.id))
         views.setOnClickPendingIntent(R.id.widget_add, WidgetActions.openApp(context, widgetId, 1, WidgetActions.TASKS_ADD, page.id))
@@ -67,7 +63,7 @@ class TaskCompactWidgetProvider : DaymarkWidget() {
             R.id.widget_folder,
             PendingIntent.getActivity(
                 context, widgetId * 10 + 2,
-                Intent(context, TaskPageActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId),
+                Intent(context, WidgetSetupActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         )
@@ -94,7 +90,7 @@ class TaskCompactWidgetProvider : DaymarkWidget() {
         val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(3)
         groups.forEach { (column, tasks) ->
             if (showHeadings) {
-                val head = RemoteViews(context.packageName, R.layout.widget_tc_head)
+                val head = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_tc_head))
                 head.setTextViewText(R.id.tc_head, "${column.name} ${tasks.size}")
                 items.addItem(column.id.hashCode().toLong() * 31, head)
             }
@@ -112,65 +108,28 @@ class TaskCompactWidgetProvider : DaymarkWidget() {
     private fun addTasks(context: Context, items: RemoteViews.RemoteCollectionItems.Builder, tasks: List<BoardCard>, today: Long) {
         run {
             tasks.forEach { task ->
-                val row = RemoteViews(context.packageName, R.layout.widget_tc_row)
+                val row = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_tc_row))
                 row.setTextViewText(R.id.tc_title, task.title.ifBlank { "Untitled" })
                 row.setViewVisibility(R.id.tc_mark, if (task.important) View.VISIBLE else View.INVISIBLE)
-                row.setInt(R.id.tc_mark, "setColorFilter", 0xFFFFB74D.toInt())
+                row.setInt(R.id.tc_mark, "setColorFilter", WidgetLook.pick(0xFFFFB74D.toInt(), 0xFFE07B00.toInt()))
                 row.setTextViewText(R.id.tc_due, dueLabel(task.dueDay, today))
-                row.setTextColor(R.id.tc_due, if (task.dueDay != null && task.dueDay < today) 0xFFFF7A7A.toInt() else 0xFF8A90A6.toInt())
+                row.setTextColor(R.id.tc_due, if (task.dueDay != null && task.dueDay < today) WidgetLook.pick(0xFFFF7A7A.toInt(), 0xFFE5303A.toInt()) else WidgetLook.pick(0xFF8A90A6.toInt(), 0xFF75685F.toInt()))
                 row.setOnClickFillInIntent(R.id.tc_row, Intent().putExtra(QuickTaskActivity.EXTRA_TASK, task.id))
                 items.addItem(task.id.hashCode().toLong(), row)
             }
         }
     }
 
-    companion object {
-        fun refresh(context: Context) = TaskCompactWidgetProvider().refresh(context)
-
-        /** Short due text for a row: "Today", "Tomorrow", a weekday this week, otherwise "14 Nov". */
-        fun dueLabel(day: Long?, today: Long): String {
-            if (day == null) return ""
-            val date = LocalDate.ofEpochDay(day)
-            return when {
-                day == today -> "Today"
-                day == today + 1 -> "Tomorrow"
-                day == today - 1 -> "Yesterday"
-                day in today + 2..today + 6 -> date.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault()))
-                else -> date.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
-            }
-        }
-    }
-}
-
-/** Page picker for the compact task widget: runs on placement and from the header. Tapping a page applies it. */
-class TaskPageActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-        // Backing out of first-time setup keeps the widget, on the first page.
-        setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
-        if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
-        val pages = BoardStore(this).load().todoPages
-
-        setContent {
-            val selected by remember { mutableStateOf(TaskListWidgetProvider.folderFor(this, widgetId)) }
-            Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = ::finish), contentAlignment = Alignment.Center) {
-                Column(
-                    Modifier.widthIn(max = 340.dp).fillMaxWidth().padding(24.dp).clip(RoundedCornerShape(24.dp))
-                        .background(SheetSolid).clickable(enabled = false) {}.padding(vertical = 16.dp)
-                ) {
-                    Text("Show tasks from", color = TodoText, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp))
-                    LazyColumn(Modifier.heightIn(max = 360.dp)) {
-                        items(pages, key = { it.id }) { page ->
-                            WidgetChoiceRow(page.name, page.id == (selected ?: pages.first().id)) {
-                                TaskListWidgetProvider.setFolder(this@TaskPageActivity, widgetId, page.id)
-                                TaskCompactWidgetProvider().update(this@TaskPageActivity, intArrayOf(widgetId))
-                                finish()
-                            }
-                        }
-                    }
-                }
-            }
+    /** Short due text for a row: "Today", "Tomorrow", a weekday this week, otherwise "14 Nov". */
+    fun dueLabel(day: Long?, today: Long): String {
+        if (day == null) return ""
+        val date = LocalDate.ofEpochDay(day)
+        return when {
+            day == today -> "Today"
+            day == today + 1 -> "Tomorrow"
+            day == today - 1 -> "Yesterday"
+            day in today + 2..today + 6 -> date.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault()))
+            else -> date.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
         }
     }
 }

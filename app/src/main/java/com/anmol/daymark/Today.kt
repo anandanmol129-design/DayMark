@@ -52,7 +52,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val Late = Danger
+private val Late get() = Danger
 private const val MAX_IMPORTANT = 5
 
 /** Everything the Today screen shows, already sorted; each list is empty when its section should be hidden. */
@@ -190,8 +190,13 @@ internal fun TodayScreen(
                     Text(todayLabel(), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
                     SettingsButton()
                 }
-                Text("Today", color = TodoText, fontSize = 34.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
+                Text(
+                    "Today", color = TodoText, fontSize = if (Look.light) 44.sp else 34.sp, fontWeight = if (Look.light) FontWeight.Black else FontWeight.Bold,
+                    letterSpacing = if (Look.light) (-1).sp else 0.sp, modifier = Modifier.padding(top = 6.dp)
+                )
                 Text(agenda.summary(), color = TodoMuted, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp))
+                val doable = remember(agenda) { (agenda.timed + agenda.untimed + agenda.habits).filter { it.card.kind == CardKind.TASK || it.card.kind == CardKind.HABIT } }
+                DayProgress(doable.count { it.done }, doable.size, Modifier.fillMaxWidth().padding(top = 14.dp, end = 6.dp))
             }
         }
         if (agenda.empty && !agenda.hasUpcoming) {
@@ -322,7 +327,7 @@ internal fun TodayScreen(
 
 /** The hairline between today and what comes next. */
 @Composable
-private fun DayDivider() = HorizontalDivider(Modifier.padding(horizontal = 36.dp, vertical = 14.dp), thickness = 0.5.dp, color = Color(0x33FFFFFF))
+private fun DayDivider() = HorizontalDivider(Modifier.padding(horizontal = 36.dp, vertical = 14.dp), thickness = 0.5.dp, color = veil(0.20f))
 
 /** A quieter, more compact row for tomorrow and later in the week: same tap, checkbox and long-press behaviour as today's. */
 @Composable
@@ -357,24 +362,25 @@ private fun Section(title: String, count: String?, countColor: Color, content: @
 }
 
 @Composable
-private fun RowDivider() = HorizontalDivider(Modifier.padding(start = 14.dp), color = Color(0x1AFFFFFF))
+private fun RowDivider() = HorizontalDivider(Modifier.padding(start = 14.dp), color = veil(0.10f))
 
 @Composable
 private fun Pill(label: String, icon: ZenIcon? = null, onClick: () -> Unit) {
     Box(
-        Modifier.padding(start = 8.dp).clip(RoundedCornerShape(12.dp)).background(Color(0x14FFFFFF)).border(0.75.dp, Color(0x2EFFFFFF), RoundedCornerShape(12.dp))
+        Modifier.padding(start = 8.dp).clip(RoundedCornerShape(12.dp)).background(veil(0.08f)).border(0.75.dp, veil(0.18f), RoundedCornerShape(12.dp))
             .clickable(onClick = onClick).padding(horizontal = 11.dp, vertical = 7.dp)
     ) { MetaLine(label, TodoText, 13.sp, leading = icon, weight = FontWeight.SemiBold) }
 }
 
 @Composable
 private fun CheckCircle(checked: Boolean, description: String, fill: Color = CalendarBlue, onClick: () -> Unit) {
+    val shape = checkShape(checked)
     Box(
-        Modifier.size(26.dp).clip(CircleShape).background(if (checked) fill else Color.Transparent)
-            .border(1.5.dp, if (checked) fill else TodoMuted.copy(alpha = .6f), CircleShape)
+        Modifier.size(26.dp).clip(shape).background(if (checked) fill else Color.Transparent)
+            .border(1.5.dp, if (checked) fill else TodoMuted.copy(alpha = .6f), shape)
             .clickable(onClick = onClick).semantics { contentDescription = description },
         contentAlignment = Alignment.Center
-    ) { if (checked) Glyph(ZenIcon.Check, Color.White, 15.dp) }
+    ) { if (checked) Glyph(ZenIcon.Check, if (fill == CalendarBlue) OnFill else Color.White, 15.dp) }
 }
 
 /** A task's checkbox: ticks at once, then completes a beat later (through the same handler as every other screen). */

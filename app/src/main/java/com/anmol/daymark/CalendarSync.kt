@@ -592,7 +592,7 @@ internal object CalendarSync {
             val slot = slot(row.start, row.end, row.allDay)
             val pk = key(row.title, row.description.trim(), slot.day, slot.minute, slot.duration)
             if (pk == link.providerKey) continue
-            val keepsImages = Markdown.imagePaths(card.details).isNotEmpty()
+            val keepsImages = Markdown.filePaths(card.details).isNotEmpty()
             val next = card.copy(
                 title = row.title.trim().ifBlank { card.title },
                 details = if (keepsImages) card.details else row.description.trim(),

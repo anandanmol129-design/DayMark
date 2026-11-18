@@ -93,7 +93,6 @@ object WidgetActions {
     /** Redraws every Daymark widget; called after each save. */
     fun refreshAll(context: Context) {
         TaskListWidgetProvider.refresh(context)
-        TaskCompactWidgetProvider.refresh(context)
         MonthWidgets.refreshAll(context)
         EventsWidgets.refreshAll(context)
         NoteWidgetProvider.refresh(context)
@@ -133,7 +132,7 @@ fun WidgetSettingsScreen(
                     Box(
                         Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
                             .background(if (selected) PaleGreen else Color.Transparent)
-                            .border(1.dp, if (selected) TodoBlue else Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+                            .border(1.dp, if (selected) TodoBlue else veil(0.20f), RoundedCornerShape(14.dp))
                             .clickable { onSize(option) }.padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {

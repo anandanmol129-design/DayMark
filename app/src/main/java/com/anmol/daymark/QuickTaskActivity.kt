@@ -63,6 +63,9 @@ class QuickTaskActivity : ComponentActivity() {
             WidgetActions.refreshAll(app)
         }
 
+        // Sheets opened from a widget follow the app's theme, in that widget's tab colour.
+        Look.load(this)
+        Look.accent = Accents.TODOS
         setContent {
             var current by remember { mutableStateOf(card) }
             var done by remember { mutableStateOf(false) }
@@ -103,7 +106,7 @@ class QuickTaskActivity : ComponentActivity() {
                                 Box(
                                     Modifier.clip(RoundedCornerShape(14.dp))
                                         .background(if (selected) PaleGreen else Color.Transparent)
-                                        .border(1.dp, if (selected) TodoBlue else Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+                                        .border(1.dp, if (selected) TodoBlue else veil(0.20f), RoundedCornerShape(14.dp))
                                         .clickable {
                                             val id = current.id
                                             current = current.copy(
@@ -133,7 +136,7 @@ class QuickTaskActivity : ComponentActivity() {
                                 contentAlignment = Alignment.Center
                             ) { Text("Complete", color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
                             Box(
-                                Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).border(BorderStroke(1.dp, Color(0x33FFFFFF)), RoundedCornerShape(16.dp))
+                                Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).border(BorderStroke(1.dp, veil(0.20f)), RoundedCornerShape(16.dp))
                                     .clickable {
                                         // Opens the app on this task's edit sheet (WidgetActions.CARD_EDIT).
                                         startActivity(WidgetActions.appIntent(this@QuickTaskActivity, WidgetActions.CARD_EDIT, current.id))

@@ -22,6 +22,10 @@ import java.util.Locale
  * the base class takes care of updating either some ids (system update) or all of its ids (data changed).
  */
 abstract class DaymarkWidget : AppWidgetProvider() {
+    /** Which widget this is, for its saved style (theme, accent, view). */
+    abstract val kind: WidgetKind
+
+    /** Draws one widget; its style is already current (see [WidgetLook.begin]). */
     abstract fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews
 
     fun update(context: Context, widgetIds: IntArray) {
@@ -29,7 +33,7 @@ abstract class DaymarkWidget : AppWidgetProvider() {
         val manager = AppWidgetManager.getInstance(context)
         val snapshot = BoardStore(context).load()
         widgetIds.forEach { id ->
-            runCatching { manager.updateAppWidget(id, render(context, id, snapshot)) }
+            runCatching { WidgetLook.begin(context, id, kind); manager.updateAppWidget(id, render(context, id, snapshot)) }
                 .onFailure { Log.e("DaymarkWidget", "Could not draw ${javaClass.simpleName} $id", it) }
         }
     }
@@ -44,6 +48,8 @@ abstract class DaymarkWidget : AppWidgetProvider() {
     }
 
     override fun onEnabled(context: Context) = WidgetClock.schedule(context)
+
+    override fun onDeleted(context: Context, widgetIds: IntArray) = widgetIds.forEach { WidgetLook.forget(context, it) }
 }
 
 /** What the calendar widgets share: the day's entries, labels and times. Week convention: Sunday first, as in the app. */
@@ -74,7 +80,7 @@ internal object CalendarWidgetData {
 
     /** A single event row, shared by the compact and detailed lists. */
     fun eventRow(context: Context, layout: Int, entry: DayEntry, time: String, day: Long): RemoteViews {
-        val row = RemoteViews(context.packageName, layout)
+        val row = RemoteViews(context.packageName, WidgetLook.layout(context, layout))
         row.setTextViewText(R.id.ev_row_title, title(entry))
         row.setTextViewText(R.id.ev_time, time)
         row.setInt(R.id.ev_dot, "setColorFilter", entryColor(entry.card).toArgb())
@@ -86,13 +92,10 @@ internal object CalendarWidgetData {
 }
 
 object EventsWidgets {
-    fun refreshAll(context: Context) {
-        EventsCompactWidgetProvider().refresh(context)
-        EventsDetailedWidgetProvider().refresh(context)
-    }
+    fun refreshAll(context: Context) = EventsDetailedWidgetProvider().refresh(context)
 
     internal fun header(context: Context, widgetId: Int, title: String, today: Long, layout: Int = R.layout.widget_events): RemoteViews {
-        val views = RemoteViews(context.packageName, layout)
+        val views = RemoteViews(context.packageName, WidgetLook.layout(context, layout))
         views.setTextViewText(R.id.ev_title, title)
         views.setOnClickPendingIntent(R.id.ev_open, WidgetActions.openApp(context, widgetId, 0, WidgetActions.CALENDAR_OPEN, day = today))
         views.setOnClickPendingIntent(R.id.ev_title, WidgetActions.openApp(context, widgetId, 0, WidgetActions.CALENDAR_OPEN, day = today))
@@ -101,11 +104,9 @@ object EventsWidgets {
         views.setPendingIntentTemplate(R.id.ev_list, WidgetActions.openApp(context, widgetId, 2, WidgetActions.CALENDAR_OPEN, day = today, mutable = true))
         return views
     }
-}
 
-/** Compact events: today's date and the next few upcoming events or timed tasks, one line each. */
-class EventsCompactWidgetProvider : DaymarkWidget() {
-    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews {
+    /** Compact view: today's date and the next few upcoming events or timed tasks, one line each. */
+    fun renderCompact(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews {
         val todayDate = LocalDate.now()
         val today = todayDate.toEpochDay()
         val nowMinute = LocalTime.now().let { it.hour * 60 + it.minute }
@@ -138,9 +139,18 @@ class EventsCompactWidgetProvider : DaymarkWidget() {
     }
 }
 
-/** Detailed events: a scrolling agenda for the next seven days, grouped by day. */
+/**
+ * Events widget. Compact: today's date and the next few events, one line each. Detailed: a scrolling
+ * agenda for the next seven days, grouped by day. (The class keeps its old name so placed widgets keep working.)
+ */
 class EventsDetailedWidgetProvider : DaymarkWidget() {
-    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews {
+    override val kind = WidgetKind.EVENTS
+
+    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews =
+        if (WidgetLook.style(context, widgetId, kind).view == WidgetView.COMPACT) EventsWidgets.renderCompact(context, widgetId, snapshot)
+        else renderDetailed(context, widgetId, snapshot)
+
+    private fun renderDetailed(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews {
         val today = LocalDate.now().toEpochDay()
         val views = EventsWidgets.header(context, widgetId, "Next 7 days", today)
         views.setTextViewText(R.id.ev_empty, "Nothing planned this week")
@@ -149,7 +159,7 @@ class EventsDetailedWidgetProvider : DaymarkWidget() {
         for (day in today..today + 6) {
             val entries = CalendarWidgetData.agenda(snapshot.cards, day).filter { !it.done }
             if (entries.isEmpty()) continue
-            val head = RemoteViews(context.packageName, R.layout.widget_ev_head)
+            val head = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_ev_head))
             head.setTextViewText(R.id.ev_head, CalendarWidgetData.dayHeading(day, today))
             head.setOnClickFillInIntent(R.id.ev_head_row, WidgetActions.dayFillIn(day))
             items.addItem(CalendarWidgetData.stableId(day, "head"), head)

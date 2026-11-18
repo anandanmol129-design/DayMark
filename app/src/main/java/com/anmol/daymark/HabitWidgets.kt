@@ -56,15 +56,14 @@ import java.util.Locale
 object HabitWidgets {
     const val ACTION_CHECK = "com.anmol.daymark.widget.HABIT_CHECK"
     private const val EXTRA_HABIT = "habit"
-    private const val INK = 0xFFF1F1F2.toInt()
-    private const val MUTED = 0xFFA9AEC0.toInt()
-    private const val EMPTY = 0x1FFFFFFF
-    private const val FUTURE = 0x0AFFFFFF
+    private val INK get() = WidgetLook.pick(0xFFF1F1F2.toInt(), 0xFF221A16.toInt())
+    private val MUTED get() = WidgetLook.pick(0xFFA9AEC0.toInt(), 0xFF8A7C72.toInt())
+    private val EMPTY get() = WidgetLook.pick(0x1FFFFFFF, 0x1A2A1F1A)
+    private val FUTURE get() = WidgetLook.pick(0x0AFFFFFF, 0x0A2A1F1A)
     private const val ON_COLOR = 0xFF14201A.toInt()
 
     fun refreshAll(context: Context) {
         HabitMonthWidgetProvider().refresh(context)
-        HabitYearWidgetProvider().refresh(context)
     }
 
     fun habits(snapshot: BoardSnapshot) = snapshot.cards.filter { it.kind == CardKind.HABIT }.sortedBy { it.createdAt }
@@ -77,13 +76,13 @@ object HabitWidgets {
     }
 
     fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot, year: Boolean): RemoteViews {
-        val views = RemoteViews(context.packageName, R.layout.widget_habit)
+        val views = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_habit))
         val habit = habitFor(context, widgetId, snapshot)
         views.setOnClickPendingIntent(
             R.id.habit_menu,
             PendingIntent.getActivity(
                 context, widgetId * 10 + 8,
-                Intent(context, HabitWidgetSettingsActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId),
+                Intent(context, WidgetSetupActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         )
@@ -151,7 +150,7 @@ object HabitWidgets {
 
     private fun checkPending(context: Context, widgetId: Int, habitId: String, year: Boolean): PendingIntent = PendingIntent.getBroadcast(
         context, widgetId,
-        Intent(context, if (year) HabitYearWidgetProvider::class.java else HabitMonthWidgetProvider::class.java)
+        Intent(context, HabitMonthWidgetProvider::class.java)
             .setAction(ACTION_CHECK).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId).putExtra(EXTRA_HABIT, habitId),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
@@ -195,7 +194,7 @@ object HabitWidgets {
         } else {
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.6f * density
-            paint.color = 0x99A9AEC0.toInt()
+            paint.color = WidgetLook.pick(0x99A9AEC0.toInt(), 0x998A7C72.toInt())
             canvas.drawCircle(r, r, r - paint.strokeWidth, paint)
         }
         return bitmap
@@ -210,7 +209,7 @@ object HabitWidgets {
         if (today) {
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.4f * scale
-            paint.color = 0xCCF1F1F2.toInt()
+            paint.color = WidgetLook.pick(0xCCF1F1F2.toInt(), 0xCC221A16.toInt())
             val inset = paint.strokeWidth / 2
             canvas.drawRoundRect(RectF(rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset), radius, radius, paint)
         }
@@ -258,7 +257,7 @@ object HabitWidgets {
             val done = day in days
             square(canvas, paint, x, y, cell, when { done -> color; day > todayDay -> FUTURE; else -> EMPTY }, day == todayDay, scale)
             if (numbers) {
-                text.color = when { done -> ON_COLOR; day > todayDay -> 0x55A9AEC0; else -> MUTED }
+                text.color = when { done -> ON_COLOR; day > todayDay -> WidgetLook.pick(0x55A9AEC0, 0x558A7C72); else -> MUTED }
                 text.typeface = if (done) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                 canvas.drawText("${i + 1}", x + cell / 2, y + cell / 2 - (text.descent() + text.ascent()) / 2, text)
             }
@@ -273,7 +272,7 @@ object HabitWidgets {
             val spacing = ((gridBottom - (top - labelH)) - blockH * stats.size) / (stats.size + 1)
             stats.forEachIndexed { i, (v, l) ->
                 val y = top - labelH + spacing * (i + 1) + blockH * i
-                value.setColor(if (i == 0 && v != "0") color else 0xFFF1F1F2.toInt())
+                value.setColor(if (i == 0 && v != "0") color else INK)
                 canvas.drawText(v, panelLeft, y + 19 * scale, value)
                 canvas.drawText(l, panelLeft, y + blockH, label)
             }
@@ -335,74 +334,20 @@ object HabitWidgets {
     }
 }
 
-/** A habit's month as a calendar of coloured squares, with its streak and a check-in button. */
+/**
+ * Habit widget: one habit's month as a calendar of coloured squares, or its past year as a grid of weeks, with
+ * its streak and a check-in button. (The class keeps its old name so placed widgets keep working.)
+ */
 class HabitMonthWidgetProvider : DaymarkWidget() {
-    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot) = HabitWidgets.render(context, widgetId, snapshot, year = false)
+    override val kind = WidgetKind.HABIT
+    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot) =
+        HabitWidgets.render(context, widgetId, snapshot, year = WidgetLook.style(context, widgetId, kind).view == WidgetView.YEAR)
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == HabitWidgets.ACTION_CHECK) HabitWidgets.handleCheck(this, context, intent) else super.onReceive(context, intent)
     }
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, widgetId: Int, newOptions: Bundle) = update(context, intArrayOf(widgetId))
-    override fun onDeleted(context: Context, widgetIds: IntArray) = widgetIds.forEach { WidgetActions.putString(context, it, "habit", null) }
-}
-
-/** A habit's past year as a GitHub-style grid of weeks, with its streak and a check-in button. */
-class HabitYearWidgetProvider : DaymarkWidget() {
-    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot) = HabitWidgets.render(context, widgetId, snapshot, year = true)
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == HabitWidgets.ACTION_CHECK) HabitWidgets.handleCheck(this, context, intent) else super.onReceive(context, intent)
-    }
-    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, widgetId: Int, newOptions: Bundle) = update(context, intArrayOf(widgetId))
-    override fun onDeleted(context: Context, widgetIds: IntArray) = widgetIds.forEach { WidgetActions.putString(context, it, "habit", null) }
-}
-
-/** Habit widget setup: which habit it shows. Runs on placement and from ⋮. */
-class HabitWidgetSettingsActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-        setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
-        if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
-        val snapshot = BoardStore(this).load()
-        val habits = HabitWidgets.habits(snapshot)
-        val today = LocalDate.now().toEpochDay()
-        fun finishWith(habitId: String?) {
-            WidgetActions.putString(this, widgetId, "habit", habitId)
-            HabitWidgets.refreshAll(this)
-            finish()
-        }
-        setContent {
-            var chosen by remember { mutableStateOf(HabitWidgets.habitFor(this, widgetId, snapshot)?.id ?: habits.firstOrNull()?.id) }
-            Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable { finishWith(chosen) }, contentAlignment = Alignment.Center) {
-                Column(
-                    Modifier.widthIn(max = 360.dp).fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(26.dp))
-                        .background(SheetSolid).clickable(enabled = false) {}.padding(vertical = 18.dp)
-                ) {
-                    Text("Habit widget", color = TodoText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 22.dp))
-                    if (habits.isEmpty()) Text("No habits yet. Add one in the Habits tab and it will show here.", color = TodoMuted, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 14.dp))
-                    else {
-                        WidgetSettingsLabel("HABIT")
-                        LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                            items(habits, key = { it.id }) { habit ->
-                                val selected = habit.id == chosen
-                                Row(Modifier.fillMaxWidth().clickable { chosen = habit.id }.padding(horizontal = 22.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.size(10.dp).clip(CircleShape).background(habitColor(habit)))
-                                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                        Text(habit.title, color = if (selected) TodoBlue else TodoText, fontSize = 16.sp, maxLines = 1)
-                                        Text("${currentStreak(habit.checkIns, today)} day streak · ${habitSummary(habit)}", color = TodoMuted, fontSize = 12.sp, maxLines = 1)
-                                    }
-                                    if (selected) Glyph(ZenIcon.Check, TodoBlue, 16.dp)
-                                }
-                            }
-                        }
-                    }
-                    Row(Modifier.padding(start = 18.dp, end = 18.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(TodoBlue).clickable { finishWith(chosen) }.padding(vertical = 13.dp),
-                            contentAlignment = Alignment.Center
-                        ) { Text("Done", color = OnAccent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
-                    }
-                }
-            }
-        }
+    override fun onDeleted(context: Context, widgetIds: IntArray) {
+        super.onDeleted(context, widgetIds)
+        widgetIds.forEach { WidgetActions.putString(context, it, "habit", null) }
     }
 }

@@ -124,7 +124,7 @@ internal fun GroupedTaskListScreen(
         val reordered = ids != lastIds[0] && ids.toSet() == lastIds[0].toSet()
         lastIds[0] = ids
         val target = ids.indexOf(selectedPageId)
-        if (target >= 0 && target != pagerState.currentPage) { if (reordered) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target) }
+        if (target >= 0 && target != pagerState.currentPage) { if (reordered) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target, animationSpec = PageSpring) }
     }
     LaunchedEffect(pagerState) {
         androidx.compose.runtime.snapshotFlow { pagerState.currentPage }.drop(1).collect { index ->
@@ -135,7 +135,8 @@ internal fun GroupedTaskListScreen(
     val current = pages.getOrNull(pagerState.currentPage)
 
     val washColor by animateColorAsState(current?.let(::folderColor) ?: Color.Transparent, tween(350), label = "folderWash")
-    Column(Modifier.fillMaxSize().folderWashBehind(washColor)) {
+    // The light theme keeps the whole tasks page in the tab's one colour, so folders don't wash it with their own.
+    Column(Modifier.fillMaxSize().then(if (Look.light) Modifier else Modifier.folderWashBehind(washColor))) {
         Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.weight(1f))
             Glyph(ZenIcon.Mic, TodoMuted, 18.dp, modifier = Modifier.clip(CircleShape).clickable(onClick = onVoice).padding(10.dp))
@@ -251,13 +252,14 @@ internal fun GroupedTaskListScreen(
                     menuOpen = menuFor == page.id, onMenuDismiss = { menuFor = null },
                     lifted = dragged, offset = { if (dragged) rowRootX + fingerX - grabDx - dragNatural else 0f },
                     modifier = (if (dragged) Modifier.zIndex(1f) else Modifier.animateItem()).onGloballyPositioned { chipBounds[page.id] = it.positionInRoot().x to it.size.width.toFloat(); if (draggingId == page.id) dragNatural = it.positionInRoot().x }
-                ) { scope.launch { pagerState.animateScrollToPage(pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0)) } }
+                ) { scope.launch { pagerState.animateScrollToPage(pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0), animationSpec = PageSpring) } }
             }
             item(key = "new-folder") { FolderChip("+", Color.Transparent, selected = false, onClick = onNewPage) }
         }
         Spacer(Modifier.height(8.dp))
         HorizontalPager(
             state = pagerState,
+            flingBehavior = rubberFling(pagerState),
             modifier = Modifier.weight(1f).fillMaxWidth(),
             key = { index -> pages.getOrNull(index)?.id ?: "empty" }
         ) { index ->
@@ -288,20 +290,20 @@ private fun FolderChip(
     menuOpen: Boolean = false, onMenuDismiss: () -> Unit = {}, lifted: Boolean = false, offset: () -> Float = { 0f },
     modifier: Modifier = Modifier, onClick: () -> Unit
 ) {
-    val fill by animateColorAsState(if (selected) Color(0x33FFFFFF) else Color.Transparent, tween(220), label = "chipFill")
-    val text by animateColorAsState(if (selected) TodoText else TodoMuted, tween(220), label = "chipText")
+    val fill by animateColorAsState(if (selected) (if (Look.light) CalendarBlue else veil(0.20f)) else Color.Transparent, tween(220), label = "chipFill")
+    val text by animateColorAsState(if (selected) (if (Look.light) OnFill else TodoText) else TodoMuted, tween(220), label = "chipText")
     val lift by animateFloatAsState(if (lifted) 1.07f else 1f, tween(120), label = "chipLift")
     Box(modifier.graphicsLayer { translationX = offset(); scaleX = lift; scaleY = lift }) {
         Surface(
-            color = if (lifted) Color(0x55FFFFFF) else fill,
+            color = if (lifted) veil(0.33f) else fill,
             shape = RoundedCornerShape(22.dp),
-            border = BorderStroke(1.dp, if (selected || lifted) Color.Transparent else Color(0x33FFFFFF)),
+            border = BorderStroke(1.dp, if (selected || lifted) Color.Transparent else veil(0.20f)),
             shadowElevation = if (lifted) 10.dp else 0.dp,
             modifier = Modifier.clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick)
         ) {
             Text(
                 label, color = text, fontSize = 15.sp, maxLines = 1,
-                modifier = Modifier.background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (selected) .34f else .16f), tint.copy(alpha = if (selected) .12f else .04f)))).padding(horizontal = 18.dp, vertical = 9.dp)
+                modifier = Modifier.then(if (Look.light) Modifier else Modifier.background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (selected) .34f else .16f), tint.copy(alpha = if (selected) .12f else .04f))))).padding(horizontal = 18.dp, vertical = 9.dp)
             )
         }
         DropdownMenu(expanded = menuOpen && onRename != null, onDismissRequest = onMenuDismiss) {
@@ -355,7 +357,7 @@ private fun TaskFolder(
         if (done.isNotEmpty()) {
             item(key = "done-header") {
                 Column(Modifier.animateItem()) {
-                    if (open.isNotEmpty()) HorizontalDivider(color = Color(0x26FFFFFF), modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                    if (open.isNotEmpty()) HorizontalDivider(color = veil(0.15f), modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { showDone = !showDone; DoneExpanded[folderId] = showDone }.padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -408,8 +410,9 @@ private fun TaskLine(
                 .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.Top
         ) {
+            val shape = checkShape(checked)
             Box(
-                Modifier.padding(top = 1.dp).size(26.dp).clip(CircleShape).background(fill).border(1.5.dp, ring, CircleShape)
+                Modifier.padding(top = 1.dp).size(26.dp).clip(shape).background(fill).border(1.5.dp, ring, shape)
                     .clickable {
                         if (card.completed) onReopen(card)
                         else if (!ticking) {
@@ -421,7 +424,7 @@ private fun TaskLine(
                     .semantics { contentDescription = if (checked) "Mark not done" else "Mark done" },
                 contentAlignment = Alignment.Center
             ) {
-                Glyph(ZenIcon.Check, Color.White, 15.dp, modifier = Modifier.scale(tick).alpha(tick))
+                Glyph(ZenIcon.Check, OnFill, 15.dp, modifier = Modifier.scale(tick).alpha(tick))
             }
             Column(Modifier.weight(1f).padding(start = 16.dp)) {
                 Text(
@@ -472,7 +475,7 @@ internal fun TaskInboxScreen(
     val scope = rememberCoroutineScope()
     LaunchedEffect(selectedColumnId, columns.size) {
         val page = columns.indexOfFirst { it.id == selectedColumnId }
-        if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page)
+        if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page, animationSpec = PageSpring)
     }
     LaunchedEffect(pagerState, columns.size) {
         androidx.compose.runtime.snapshotFlow { pagerState.currentPage }.collect { page ->
@@ -501,6 +504,7 @@ internal fun TaskInboxScreen(
 
         HorizontalPager(
             state = pagerState,
+            flingBehavior = rubberFling(pagerState),
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 18.dp),
             pageSpacing = 14.dp,
@@ -523,7 +527,7 @@ internal fun TaskInboxScreen(
             columns = columns,
             currentPage = pagerState.currentPage,
             darkTheme = true,
-            onSelectPage = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+            onSelectPage = { page -> scope.launch { pagerState.animateScrollToPage(page, animationSpec = PageSpring) } },
             onAddColumn = onAddColumn
         )
     }

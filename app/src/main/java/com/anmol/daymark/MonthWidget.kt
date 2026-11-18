@@ -29,10 +29,7 @@ internal data class MonthState(val month: YearMonth, val selected: Long) {
 }
 
 object MonthWidgets {
-    fun refreshAll(context: Context) {
-        MonthCompactWidgetProvider().refresh(context)
-        MonthDetailedWidgetProvider().refresh(context)
-    }
+    fun refreshAll(context: Context) = MonthDetailedWidgetProvider().refresh(context)
 
     const val ACTION = "com.anmol.daymark.widget.MONTH"
     const val EXTRA_OP = "op"
@@ -64,9 +61,8 @@ object MonthWidgets {
         R.id.cell_dot_35, R.id.cell_dot_36, R.id.cell_dot_37, R.id.cell_dot_38, R.id.cell_dot_39, R.id.cell_dot_40, R.id.cell_dot_41
     )
 
-    private const val INK = 0xFFF1F1F2.toInt()
-    private const val INK_ON_ACCENT = 0xFF161B2E.toInt()
-    private const val OUTSIDE = 0xFF5F667D.toInt()
+    private val INK get() = WidgetLook.pick(0xFFF1F1F2.toInt(), 0xFF221A16.toInt())
+    private val OUTSIDE get() = WidgetLook.pick(0xFF5F667D.toInt(), 0xFFB8ABA1.toInt())
 
     /** The grid shared by both sizes. Weeks start on Sunday, like the app's calendar week strip. */
     private fun grid(context: Context, views: RemoteViews, cards: List<BoardCard>, state: MonthState, today: Long, selectable: Boolean, widgetId: Int) {
@@ -81,10 +77,10 @@ object MonthWidgets {
             val isToday = day == today
             val inMonth = YearMonth.from(date) == state.month
             views.setTextViewText(NUM[i], date.dayOfMonth.toString())
-            views.setTextColor(NUM[i], if (isToday) INK_ON_ACCENT else if (inMonth) INK else OUTSIDE)
+            views.setTextColor(NUM[i], if (isToday) WidgetLook.onAccent else if (inMonth) INK else OUTSIDE)
             views.setInt(
                 NUM[i], "setBackgroundResource",
-                if (isToday) R.drawable.widget_day_today else if (selectable && day == state.selected) R.drawable.widget_day_selected else 0
+                if (isToday) WidgetLook.drawable(R.drawable.widget_day_today) else if (selectable && day == state.selected) WidgetLook.drawable(R.drawable.widget_day_selected) else 0
             )
             val marker = CalendarWidgetData.agenda(cards, day).firstOrNull()
             views.setViewVisibility(DOT[i], if (marker != null) View.VISIBLE else View.INVISIBLE)
@@ -103,7 +99,7 @@ object MonthWidgets {
     fun renderCompact(context: Context, widgetId: Int, snapshot: BoardSnapshot): RemoteViews {
         val todayDate = LocalDate.now()
         val state = MonthState.today(todayDate)
-        val views = RemoteViews(context.packageName, R.layout.widget_month_compact)
+        val views = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_month_compact))
         views.setTextViewText(R.id.month_title, state.month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())))
         grid(context, views, snapshot.cards, state, todayDate.toEpochDay(), false, widgetId)
         // Anywhere on the widget opens the calendar.
@@ -115,7 +111,7 @@ object MonthWidgets {
         val todayDate = LocalDate.now()
         val today = todayDate.toEpochDay()
         val state = MonthState.load(context, widgetId, todayDate)
-        val views = RemoteViews(context.packageName, R.layout.widget_month_detailed)
+        val views = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_month_detailed))
         views.setTextViewText(R.id.month_title, state.month.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())))
         grid(context, views, snapshot.cards, state, today, true, widgetId)
 
@@ -161,14 +157,17 @@ object MonthWidgets {
     }
 }
 
-/** Compact month: month name, weekday initials and a day grid with a dot under days that have plans. Tap opens the calendar. */
-class MonthCompactWidgetProvider : DaymarkWidget() {
-    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot) = MonthWidgets.renderCompact(context, widgetId, snapshot)
-}
-
-/** Detailed month: month arrows, tap-to-select days, and the selected day's first entries below the grid. */
+/**
+ * Month widget. Compact: month name, weekday initials and a day grid with dots on days with plans; a tap opens the
+ * calendar. Detailed: month arrows, tap-to-select days and the selected day's first entries below the grid.
+ * (The class keeps its old name so placed widgets keep working.)
+ */
 class MonthDetailedWidgetProvider : DaymarkWidget() {
-    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot) = MonthWidgets.renderDetailed(context, widgetId, snapshot)
+    override val kind = WidgetKind.MONTH
+
+    override fun render(context: Context, widgetId: Int, snapshot: BoardSnapshot) =
+        if (WidgetLook.style(context, widgetId, kind).view == WidgetView.COMPACT) MonthWidgets.renderCompact(context, widgetId, snapshot)
+        else MonthWidgets.renderDetailed(context, widgetId, snapshot)
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != MonthWidgets.ACTION) return super.onReceive(context, intent)
@@ -192,6 +191,7 @@ class MonthDetailedWidgetProvider : DaymarkWidget() {
     }
 
     override fun onDeleted(context: Context, widgetIds: IntArray) {
+        super.onDeleted(context, widgetIds)
         widgetIds.forEach { WidgetActions.putString(context, it, "month", null) }
     }
 }

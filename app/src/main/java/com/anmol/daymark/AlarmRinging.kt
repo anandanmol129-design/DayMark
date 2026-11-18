@@ -204,12 +204,12 @@ class AlarmActivity : ComponentActivity() {
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val backdrop = Backdrop.load(this)
+        Look.load(this)
         setContent {
             val ring by AlarmService.ringing.collectAsState()
             LaunchedEffect(ring) { if (ring == null) finish() }
             val shown = ring ?: return@setContent
-            GlassBackdrop(backdrop) {
+            GlassBackdrop {
                 AlarmScreen(shown,
                     onDismiss = { act(shown.cardId, Reminders::dismiss) },
                     onSnooze = { act(shown.cardId, Reminders::snooze) },

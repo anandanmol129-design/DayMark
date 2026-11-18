@@ -64,7 +64,7 @@
         <receiver
             android:name=".TaskListWidgetProvider"
             android:exported="true"
-            android:label="Tasks (detailed)">
+            android:label="Tasks">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -73,7 +73,7 @@
                 android:resource="@xml/widget_tasks_info" />
         </receiver>
         <activity
-            android:name=".WidgetFolderActivity"
+            android:name=".WidgetSetupActivity"
             android:exported="true"
             android:excludeFromRecents="true"
             android:taskAffinity=""
@@ -82,28 +82,7 @@
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
             </intent-filter>
         </activity>
-        <!-- Widgets: compact task list, month and agenda widgets, quick task sheet, midnight refresh. -->
-        <receiver
-            android:name=".TaskCompactWidgetProvider"
-            android:exported="true"
-            android:label="Tasks (compact)">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_tasks_compact_info" />
-        </receiver>
-        <activity
-            android:name=".TaskPageActivity"
-            android:exported="true"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:theme="@style/Theme.Daymark.Sheet">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
-            </intent-filter>
-        </activity>
+        <!-- Widgets: month and agenda widgets, quick task sheet, midnight refresh. Each widget has Compact/Detailed (or Month/Year) views, chosen on its settings page. -->
         <activity
             android:name=".QuickTaskActivity"
             android:exported="false"
@@ -112,20 +91,9 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Daymark.Sheet" />
         <receiver
-            android:name=".MonthCompactWidgetProvider"
-            android:exported="true"
-            android:label="Calendar month (compact)">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_month_compact_info" />
-        </receiver>
-        <receiver
             android:name=".MonthDetailedWidgetProvider"
             android:exported="true"
-            android:label="Calendar month (detailed)">
+            android:label="Calendar month">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -134,20 +102,9 @@
                 android:resource="@xml/widget_month_detailed_info" />
         </receiver>
         <receiver
-            android:name=".EventsCompactWidgetProvider"
-            android:exported="true"
-            android:label="Events (compact)">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_events_compact_info" />
-        </receiver>
-        <receiver
             android:name=".EventsDetailedWidgetProvider"
             android:exported="true"
-            android:label="Events (detailed)">
+            android:label="Events">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -174,20 +131,10 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_note_info" />
         </receiver>
-        <activity
-            android:name=".NoteWidgetSettingsActivity"
-            android:exported="true"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
-            </intent-filter>
-        </activity>
         <receiver
             android:name=".HabitMonthWidgetProvider"
             android:exported="true"
-            android:label="Habit month">
+            android:label="Habit">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -195,27 +142,6 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_habit_month_info" />
         </receiver>
-        <receiver
-            android:name=".HabitYearWidgetProvider"
-            android:exported="true"
-            android:label="Habit year">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_habit_year_info" />
-        </receiver>
-        <activity
-            android:name=".HabitWidgetSettingsActivity"
-            android:exported="true"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
-            </intent-filter>
-        </activity>
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".ReminderSystemReceiver" android:exported="true">
             <intent-filter>
@@ -238,6 +164,11 @@
             android:taskAffinity="com.anmol.daymark.alarm"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
+        <!-- Writes automatic backups to the folder chosen in Settings. -->
+        <service
+            android:name=".AutoBackupJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <!-- Shares a fresh backup zip with Drive (or any app) without exposing other files. -->
         <provider
             android:name="androidx.core.content.FileProvider"

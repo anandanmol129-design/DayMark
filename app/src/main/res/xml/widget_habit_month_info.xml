@@ -1,5 +1,5 @@
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:configure="com.anmol.daymark.HabitWidgetSettingsActivity"
+    android:configure="com.anmol.daymark.WidgetSetupActivity"
     android:description="@string/widget_habit_month_description"
     android:initialLayout="@layout/widget_habit"
     android:previewLayout="@layout/widget_habit"

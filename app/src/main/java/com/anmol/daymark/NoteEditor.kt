@@ -5,6 +5,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 
 import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -74,6 +80,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -115,6 +122,20 @@ internal fun NoteEditorSheet(
     var showDoodle by remember { mutableStateOf(false) }
     var columnMenu by remember { mutableStateOf(false) }
     val titleFocus = remember { FocusRequester() }
+    // Reader mode shows the note as a page with nothing to type into, so scrolling and tapping never pop the keyboard.
+    // The choice is remembered: once on, existing notes open in it. New notes always open ready to write.
+    var reading by rememberSaveable(editing?.id) { mutableStateOf(editing != null && NoteReader.enabled(context)) }
+    var attaching by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    fun setReading(on: Boolean) {
+        if (on) { focusManager.clearFocus(); keyboard?.hide(); currentId = null }
+        reading = on
+        NoteReader.set(context, on)
+    }
+    var look by remember { mutableStateOf(NoteReader.look(context)) }
+    fun setLook(next: ReaderLook) { look = next; NoteReader.setLook(context, next) }
 
     fun valueOf(block: NoteBlock) = values[block.id]?.takeIf { it.text == block.text } ?: TextFieldValue(block.text, TextRange(block.text.length))
     fun commit(next: List<NoteBlock>) {
@@ -129,6 +150,13 @@ internal fun NoteEditorSheet(
         focusTarget = edit.focus
     }
     fun indexOf(id: Long?) = blocks.indexOfFirst { it.id == id }.takeIf { it >= 0 }
+    fun toggleCheck(block: NoteBlock) {
+        val i = blocks.indexOfFirst { it.id == block.id }
+        if (i >= 0) {
+            blocks[i] = block.copy(prefix = if (block.checked) block.prefix.replace(Regex("""\[[xX]]"""), "[ ]") else block.prefix.replace("[ ]", "[x]"))
+            commit(blocks.toList())
+        }
+    }
     fun insert(block: NoteBlock) = apply(NoteBlocks.insertAfter(blocks, indexOf(currentId), block))
     fun toggle(kind: BlockKind) {
         val index = indexOf(currentId) ?: return
@@ -162,6 +190,20 @@ internal fun NoteEditorSheet(
             cover = path
         } else insert(NoteBlock(NoteBlocks.newId(), BlockKind.IMAGE, path))
     }
+    // Any kind of file: copied into the app on a background thread, then shown as a picture or a file card.
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        attaching = true
+        scope.launch {
+            val file = withContext(Dispatchers.IO) { Attachments.copy(context, uri) }
+            attaching = false
+            when {
+                file == null -> android.widget.Toast.makeText(context, "Couldn’t add that file", android.widget.Toast.LENGTH_SHORT).show()
+                Attachments.kindOf(file.name, file.mime) == FileKind.IMAGE -> insert(NoteBlock(NoteBlocks.newId(), BlockKind.IMAGE, file.path))
+                else -> insert(NoteBlock(NoteBlocks.newId(), BlockKind.FILE, file.name, file.path))
+            }
+        }
+    }
     fun chooseCover() = pickCover.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
 
     LaunchedEffect(Unit) {
@@ -188,7 +230,7 @@ internal fun NoteEditorSheet(
                         columns.forEach { column -> DropdownMenuItem(text = { Text(column.name) }, onClick = { columnId = column.id; columnMenu = false }) }
                     }
                 }
-                if (cover.isEmpty()) {
+                if (cover.isEmpty() && !reading) {
                     Row(
                         Modifier.padding(end = 8.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = ::chooseCover).padding(horizontal = 12.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -197,6 +239,11 @@ internal fun NoteEditorSheet(
                         Text("Cover", color = TodoMuted, fontSize = 14.sp)
                     }
                 }
+                Box(
+                    Modifier.padding(end = 8.dp).size(40.dp).clip(CircleShape).background(if (reading) GlassAccent else Color.Transparent)
+                        .clickable { setReading(!reading) }.semantics { contentDescription = if (reading) "Edit note" else "Reader mode" },
+                    contentAlignment = Alignment.Center
+                ) { Glyph(ZenIcon.Book, if (reading) TodoText else TodoMuted, 20.dp) }
                 Text(
                     "Done", color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(TodoBlue).clickable(onClick = ::finish).padding(horizontal = 18.dp, vertical = 9.dp)
@@ -207,7 +254,7 @@ internal fun NoteEditorSheet(
                 val header = rememberSavedBitmap(cover)
                 if (cover.isNotEmpty()) Box(Modifier.bleed(20.dp).padding(top = 8.dp).fillMaxWidth().height(220.dp).background(TodoCard)) {
                     header?.let { Image(it, contentDescription = "Cover image", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                    Row(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!reading) Row(Modifier.align(Alignment.BottomEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CoverButton(ZenIcon.Picture, "Change cover", ::chooseCover)
                         CoverButton(ZenIcon.Close, "Remove cover") {
                             if (cover != editing?.imagePath) runCatching { java.io.File(cover).delete() }
@@ -215,7 +262,10 @@ internal fun NoteEditorSheet(
                         }
                     }
                 }
-                BasicTextField(
+                if (reading) {
+                    if (title.isNotBlank()) Text(title, color = TodoText, fontSize = 25.sp * look.scale, lineHeight = 32.sp * look.scale, fontFamily = look.font.family, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp))
+                    else Spacer(Modifier.height(12.dp))
+                } else BasicTextField(
                     value = title,
                     onValueChange = { typed ->
                         // Enter in the title moves on to the body instead of making a two-line title.
@@ -240,9 +290,15 @@ internal fun NoteEditorSheet(
                         Glyph(ZenIcon.ArrowUpRight, TodoMuted, 16.dp, modifier = Modifier.padding(top = 2.dp, start = 8.dp))
                     }
                 }
-                blocks.forEachIndexed { index, block ->
+                if (reading) SelectionContainer {
+                    Column {
+                        blocks.forEach { block -> key(block.id) { ReaderBlock(block, look) { toggleCheck(block) } } }
+                        if (isSave && comment.isNotBlank()) ReaderComment(comment, look)
+                    }
+                } else blocks.forEachIndexed { index, block ->
                     key(block.id) {
                         when (block.kind) {
+                            BlockKind.FILE -> AttachmentChip(block.text, block.prefix, Modifier.padding(vertical = 6.dp), onRemove = { commit(blocks.filterNot { it.id == block.id }) })
                             BlockKind.IMAGE -> ImageBlock(block.text) { commit(blocks.filterNot { it.id == block.id }) }
                             BlockKind.DIVIDER -> DividerBlock { commit(blocks.filterNot { it.id == block.id }) }
                             BlockKind.TABLE -> TableBlock(
@@ -262,13 +318,7 @@ internal fun NoteEditorSheet(
                                 focusTarget = focusTarget,
                                 onFocusHandled = { focusTarget = null },
                                 onFocused = { currentId = block.id },
-                                onToggleCheck = {
-                                    val i = blocks.indexOfFirst { it.id == block.id }
-                                    if (i >= 0) {
-                                        blocks[i] = block.copy(prefix = if (block.checked) block.prefix.replace(Regex("""\[[xX]]"""), "[ ]") else block.prefix.replace("[ ]", "[x]"))
-                                        commit(blocks.toList())
-                                    }
-                                },
+                                onToggleCheck = { toggleCheck(block) },
                                 onBackspaceAtStart = { NoteBlocks.backspaceAtStart(blocks, blocks.indexOfFirst { it.id == block.id })?.let(::apply) },
                                 onValueChange = { typed ->
                                     val i = blocks.indexOfFirst { it.id == block.id }
@@ -301,14 +351,20 @@ internal fun NoteEditorSheet(
                         }
                     }
                 }
-                if (isSave) CommentBox(comment, onChange = { comment = it }, onFocused = { currentId = null })
-                // The empty space under the note puts the cursor at the end of the last line.
-                Spacer(
-                    Modifier.fillMaxWidth().height(220.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                        blocks.lastOrNull { it.kind.isText }?.let { focusTarget = BlockFocus(it.id, it.text.length) }
-                    }
-                )
+                if (reading) Spacer(Modifier.height(120.dp))
+                else {
+                    if (isSave) CommentBox(comment, onChange = { comment = it }, onFocused = { currentId = null })
+                    // The empty space under the note puts the cursor at the end of the last line.
+                    Spacer(
+                        Modifier.fillMaxWidth().height(220.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            blocks.lastOrNull { it.kind.isText }?.let { focusTarget = BlockFocus(it.id, it.text.length) }
+                        }
+                    )
+                }
             }
+            if (attaching) Text("Adding file…", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+            if (reading) ReaderBar(look, ::setLook)
+            else {
             val current = blocks.firstOrNull { it.id == currentId }?.kind
             NoteToolbar(
                 actions = listOf(
@@ -320,12 +376,14 @@ internal fun NoteEditorSheet(
                     "🖼" to { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     "―" to { insert(NoteBlock(NoteBlocks.newId(), BlockKind.DIVIDER)) },
                     "▦" to { insert(NoteBlock(NoteBlocks.newId(), BlockKind.TABLE, rows = listOf(listOf("", ""), listOf("", "")))) },
-                    "✎" to { showDoodle = true }
+                    "✎" to { showDoodle = true },
+                    "📎" to { if (!attaching) pickFile.launch(arrayOf("*/*")) }
                 ),
                 active = setOfNotNull(when (current) {
                     BlockKind.HEADING -> "H"; BlockKind.BULLET -> "•"; BlockKind.CHECK -> "☐"; BlockKind.NUMBERED -> "1."; BlockKind.QUOTE -> "❝"; else -> null
                 })
             )
+            }
         }
     }
     cropUri?.let { uri ->
@@ -375,41 +433,9 @@ private fun TextBlock(
             keyboard?.show()
         }
     }
-    val (size, line) = when (block.kind) {
-        BlockKind.HEADING -> when (block.level) { 1 -> 26.sp to 33.sp; 2 -> 22.sp to 29.sp; else -> 19.sp to 26.sp }
-        else -> 17.sp to 25.sp
-    }
-    val color = when {
-        block.checked -> TodoMuted.copy(alpha = .7f)
-        block.kind == BlockKind.QUOTE -> TodoMuted
-        else -> TodoText
-    }
-    val style = TextStyle(
-        color = color, fontSize = size, lineHeight = line,
-        fontWeight = if (block.kind == BlockKind.HEADING) FontWeight.Bold else FontWeight.Normal,
-        fontStyle = if (block.kind == BlockKind.QUOTE) FontStyle.Italic else FontStyle.Normal,
-        textDecoration = if (block.checked) TextDecoration.LineThrough else null
-    )
-    val indent = block.prefix.takeWhile { it == ' ' || it == '\t' }.length
-    val transformation = remember(color) { InlineMarkdown(color) }
-    Row(
-        Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = (indent * 6).dp, top = if (block.kind == BlockKind.HEADING) 8.dp else 1.dp, bottom = 1.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        val marker = Modifier.width(26.dp)
-        when (block.kind) {
-            BlockKind.BULLET -> Glyph(ZenIcon.Bullet, TodoBlue, 20.dp, modifier = marker)
-            BlockKind.NUMBERED -> Text(block.prefix.trim(), color = TodoBlue, fontSize = 16.sp, lineHeight = line, maxLines = 1, modifier = marker)
-            BlockKind.CHECK -> Box(marker.height(25.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onToggleCheck), contentAlignment = Alignment.CenterStart) {
-                Box(
-                    Modifier.size(18.dp).clip(RoundedCornerShape(5.dp)).background(if (block.checked) TodoBlue else Color.Transparent)
-                        .border(1.5.dp, if (block.checked) TodoBlue else TodoMuted, RoundedCornerShape(5.dp)),
-                    contentAlignment = Alignment.Center
-                ) { if (block.checked) Glyph(ZenIcon.Check, OnAccent, 12.dp) }
-            }
-            BlockKind.QUOTE -> Box(Modifier.padding(end = 12.dp, top = 3.dp, bottom = 3.dp).width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(TodoBlue.copy(alpha = .7f)))
-            else -> Unit
-        }
+    val style = noteTextStyle(block)
+    val transformation = remember(style.color) { InlineMarkdown(style.color) }
+    BlockLine(block, style, onToggleCheck) {
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -424,6 +450,164 @@ private fun TextBlock(
                 },
             decorationBox = { field -> Box { if (value.text.isEmpty() && hint != null) Text(hint, style = style.copy(color = TodoMuted.copy(alpha = .55f), textDecoration = null)); field() } }
         )
+    }
+}
+
+/** How a text block's words look, the same while writing and while reading. */
+private fun noteTextStyle(block: NoteBlock): TextStyle {
+    val (size, line) = when (block.kind) {
+        BlockKind.HEADING -> when (block.level) { 1 -> 26.sp to 33.sp; 2 -> 22.sp to 29.sp; else -> 19.sp to 26.sp }
+        else -> 17.sp to 25.sp
+    }
+    return TextStyle(
+        color = when {
+            block.checked -> TodoMuted.copy(alpha = .7f)
+            block.kind == BlockKind.QUOTE -> TodoMuted
+            else -> TodoText
+        },
+        fontSize = size, lineHeight = line,
+        fontWeight = if (block.kind == BlockKind.HEADING) FontWeight.Bold else FontWeight.Normal,
+        fontStyle = if (block.kind == BlockKind.QUOTE) FontStyle.Italic else FontStyle.Normal,
+        textDecoration = if (block.checked) TextDecoration.LineThrough else null
+    )
+}
+
+/** One line of a note: its list marker, checkbox or quote bar, then [content]. */
+@Composable
+private fun BlockLine(block: NoteBlock, style: TextStyle, onToggleCheck: () -> Unit, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    val indent = block.prefix.takeWhile { it == ' ' || it == '\t' }.length
+    Row(
+        Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = (indent * 6).dp, top = if (block.kind == BlockKind.HEADING) 8.dp else 1.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        val marker = Modifier.width(26.dp)
+        when (block.kind) {
+            BlockKind.BULLET -> Glyph(ZenIcon.Bullet, TodoBlue, 20.dp, modifier = marker)
+            BlockKind.NUMBERED -> Text(block.prefix.trim(), color = TodoBlue, fontSize = 16.sp, lineHeight = style.lineHeight, maxLines = 1, modifier = marker)
+            BlockKind.CHECK -> Box(marker.height(25.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onToggleCheck), contentAlignment = Alignment.CenterStart) {
+                Box(
+                    Modifier.size(18.dp).clip(RoundedCornerShape(5.dp)).background(if (block.checked) TodoBlue else Color.Transparent)
+                        .border(1.5.dp, if (block.checked) TodoBlue else TodoMuted, RoundedCornerShape(5.dp)),
+                    contentAlignment = Alignment.Center
+                ) { if (block.checked) Glyph(ZenIcon.Check, OnAccent, 12.dp) }
+            }
+            BlockKind.QUOTE -> Box(Modifier.padding(end = 12.dp, top = 3.dp, bottom = 3.dp).width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(TodoBlue.copy(alpha = .7f)))
+            else -> Unit
+        }
+        content()
+    }
+}
+
+/** A block in reader mode: the same look as the editor, but nothing to type into. Checkboxes and links still work. */
+@Composable
+private fun ReaderBlock(block: NoteBlock, look: ReaderLook, onToggleCheck: () -> Unit) {
+    when (block.kind) {
+        BlockKind.IMAGE -> {
+            val bitmap = rememberSavedBitmap(block.text)
+            if (bitmap != null) Image(
+                bitmap, null, contentScale = ContentScale.Fit, alignment = Alignment.CenterStart,
+                modifier = Modifier.padding(vertical = 8.dp).heightIn(max = 420.dp).clip(RoundedCornerShape(12.dp))
+            )
+        }
+        BlockKind.DIVIDER -> HorizontalDivider(color = TodoMuted.copy(alpha = .45f), thickness = 1.5.dp, modifier = Modifier.padding(vertical = 12.dp))
+        BlockKind.FILE -> AttachmentChip(block.text, block.prefix, Modifier.padding(vertical = 6.dp))
+        BlockKind.TABLE -> {
+            val width = block.rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
+            Column(Modifier.padding(vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).border(1.dp, TodoBorder, RoundedCornerShape(10.dp))) {
+                block.rows.forEachIndexed { r, row ->
+                    if (r > 0) HorizontalDivider(color = TodoBorder)
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).then(if (r == 0) Modifier.background(TodoCardRaised) else Modifier)) {
+                        (0 until width).forEach { c ->
+                            if (c > 0) VerticalDivider(color = TodoBorder)
+                            Text(
+                                Markdown.styled(row.getOrNull(c).orEmpty(), links = true), color = if (r == 0) TodoText else TodoMuted, fontSize = 15.sp * look.scale,
+                                lineHeight = 21.sp * look.scale, fontFamily = look.font.family,
+                                fontWeight = if (r == 0) FontWeight.SemiBold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 9.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        else -> {
+            val style = noteTextStyle(block).let { it.copy(fontSize = it.fontSize * look.scale, lineHeight = it.lineHeight * look.scale, fontFamily = look.font.family) }
+            BlockLine(block, style, onToggleCheck) {
+                Text(Markdown.styled(block.text, links = true), style = style, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** A saved item's own comment, shown read-only under the content in reader mode. */
+@Composable
+private fun ReaderComment(text: String, look: ReaderLook) {
+    Row(Modifier.padding(top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(TodoCard).height(IntrinsicSize.Min)) {
+        Box(Modifier.width(3.dp).fillMaxHeight().background(Amber.copy(alpha = .7f)))
+        Text(text, color = TodoText, fontSize = 15.sp * look.scale, lineHeight = 22.sp * look.scale, fontFamily = look.font.family, modifier = Modifier.weight(1f).padding(horizontal = 14.dp, vertical = 12.dp))
+    }
+}
+
+/** Typefaces reader mode offers; all come with Android, so nothing is downloaded or bundled. */
+internal enum class ReaderFont(val label: String, val family: FontFamily) {
+    SANS("Sans", FontFamily.SansSerif), SERIF("Serif", FontFamily.Serif), MONO("Mono", FontFamily.Monospace)
+}
+
+/** How reader mode sets text: a typeface and a size step (see [NoteReader.Sizes]). */
+internal data class ReaderLook(val font: ReaderFont = ReaderFont.SANS, val size: Int = NoteReader.DEFAULT_SIZE) {
+    val scale get() = NoteReader.Sizes[size.coerceIn(NoteReader.Sizes.indices)]
+}
+
+/** Remembers whether notes open in reader mode, and the reading font and size. */
+internal object NoteReader {
+    private const val PREFS = "daymark_settings"
+    private const val KEY = "note_reader"
+    private const val KEY_FONT = "note_reader_font"
+    private const val KEY_SIZE = "note_reader_size"
+    val Sizes = listOf(.85f, .92f, 1f, 1.1f, 1.2f, 1.32f, 1.45f)
+    const val DEFAULT_SIZE = 2
+    private fun prefs(context: android.content.Context) = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+    fun enabled(context: android.content.Context) = prefs(context).getBoolean(KEY, false)
+    fun set(context: android.content.Context, on: Boolean) = prefs(context).edit().putBoolean(KEY, on).apply()
+    fun look(context: android.content.Context) = ReaderLook(
+        ReaderFont.entries.firstOrNull { it.name == prefs(context).getString(KEY_FONT, null) } ?: ReaderFont.SANS,
+        prefs(context).getInt(KEY_SIZE, DEFAULT_SIZE).coerceIn(Sizes.indices)
+    )
+    fun setLook(context: android.content.Context, look: ReaderLook) = prefs(context).edit().putString(KEY_FONT, look.font.name).putInt(KEY_SIZE, look.size).apply()
+}
+
+/** The bar at the bottom of reader mode: pick a typeface, and make the text smaller or bigger. */
+@Composable
+private fun ReaderBar(look: ReaderLook, onChange: (ReaderLook) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = TodoBorder)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.clip(RoundedCornerShape(50)).background(TodoCardRaised).padding(3.dp)) {
+                ReaderFont.entries.forEach { font ->
+                    val active = font == look.font
+                    Text(
+                        font.label, fontFamily = font.family, fontSize = 15.sp, color = if (active) OnAccent else TodoMuted,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (active) TodoBlue else Color.Transparent)
+                            .clickable { onChange(look.copy(font = font)) }.semantics { contentDescription = "${font.label} font" }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            @Composable
+            fun sizeButton(label: String, size: androidx.compose.ui.unit.TextUnit, description: String, enabled: Boolean, step: Int) = Box(
+                Modifier.size(42.dp).clip(CircleShape).background(TodoCardRaised)
+                    .clickable(enabled = enabled) { onChange(look.copy(size = look.size + step)) }.semantics { contentDescription = description },
+                contentAlignment = Alignment.Center
+            ) { Text(label, fontSize = size, fontWeight = FontWeight.SemiBold, color = if (enabled) TodoText else TodoMuted.copy(alpha = .35f)) }
+            sizeButton("A", 13.sp, "Smaller text", look.size > 0, -1)
+            Text(
+                "${(look.scale * 100).toInt()}%", color = TodoMuted, fontSize = 13.sp,
+                modifier = Modifier.width(52.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            sizeButton("A", 19.sp, "Bigger text", look.size < NoteReader.Sizes.lastIndex, 1)
+        }
     }
 }
 
@@ -451,7 +635,7 @@ private fun DividerBlock(onRemove: () -> Unit) {
 @Composable
 private fun RemoveButton(modifier: Modifier, onClick: () -> Unit) {
     Box(modifier.size(28.dp).clip(CircleShape).background(Color(0xCC1C1C1A)).border(1.dp, TodoBorder, CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Glyph(ZenIcon.Close, TodoText, 17.dp)
+        Glyph(ZenIcon.Close, Color(0xFFEDEAE3), 17.dp)
     }
 }
 
@@ -503,7 +687,7 @@ private fun CoverButton(icon: ZenIcon, description: String, onClick: () -> Unit)
         Modifier.size(38.dp).clip(CircleShape).background(Color(0x99141413)).border(0.75.dp, Color(0x40FFFFFF), CircleShape)
             .clickable(onClick = onClick).semantics { contentDescription = description },
         contentAlignment = Alignment.Center
-    ) { Glyph(icon, TodoText, 17.dp) }
+    ) { Glyph(icon, Color(0xFFEDEAE3), 17.dp) }
 }
 
 /** Lets a child ignore [horizontal] padding on its parent so it can run edge to edge. */

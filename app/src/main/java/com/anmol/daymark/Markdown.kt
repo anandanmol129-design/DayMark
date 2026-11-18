@@ -71,12 +71,15 @@ sealed interface MdBlock {
     data class Heading(val level: Int, val text: String) : MdBlock
     data class Bullet(val text: String) : MdBlock
     data class Image(val path: String) : MdBlock
+    data class File(val name: String, val path: String) : MdBlock
     data class Table(val rows: List<List<String>>) : MdBlock
     data class Paragraph(val text: String) : MdBlock
     data object Rule : MdBlock
 }
 
 private val ImageLine = Regex("""^!\[[^\]]*]\((.+)\)$""")
+/** An attached file: `[📎 name](path)` on a line of its own. */
+private val FileLine = Regex("""^\[📎 ?([^\]]*)]\((/[^)]+)\)$""")
 private val RuleLine = Regex("""^(-{3,}|\*{3,}|_{3,})$""")
 private val TableSeparator = Regex("""^\|?[\s:|-]+\|?$""")
 
@@ -92,6 +95,7 @@ object Markdown {
                 line.isEmpty() -> Unit
                 RuleLine.matches(line) -> blocks += MdBlock.Rule
                 ImageLine.matches(line) -> blocks += MdBlock.Image(ImageLine.find(line)!!.groupValues[1])
+                FileLine.matches(line) -> FileLine.find(line)!!.groupValues.let { blocks += MdBlock.File(it[1], it[2]) }
                 line.startsWith("#") -> {
                     val level = line.takeWhile { it == '#' }.length.coerceIn(1, 3)
                     blocks += MdBlock.Heading(level, line.trimStart('#').trim())
@@ -109,6 +113,18 @@ object Markdown {
     }
 
     fun imagePaths(source: String): List<String> = source.lines().mapNotNull { ImageLine.find(it.trim())?.groupValues?.get(1) }
+
+    /** Attached files as (name, path). */
+    fun attachments(source: String): List<Pair<String, String>> = source.lines().mapNotNull { FileLine.find(it.trim())?.groupValues?.let { g -> g[1] to g[2] } }
+
+    /** Every stored file a note body points to: its pictures and its attachments. */
+    fun filePaths(source: String): List<String> = imagePaths(source) + attachments(source).map { it.second }
+
+    /** The note body with every picture or attachment line pointing at one of [paths] taken out. */
+    fun withoutFiles(source: String, paths: Set<String>): String = source.split('\n').filterNot { line ->
+        val t = line.trim()
+        (ImageLine.find(t)?.groupValues?.get(1) ?: FileLine.find(t)?.groupValues?.get(2))?.let { it in paths } == true
+    }.joinToString("\n")
 
 
     /** Splits table source lines into cells, dropping the `| --- |` separator row (shared by the card and the editor). */
@@ -138,7 +154,7 @@ object Markdown {
     }
 
     /** Read view of a line: inline markers hidden, the words styled. */
-    fun styled(text: String): AnnotatedString {
+    fun styled(text: String, links: Boolean = false): AnnotatedString {
         val spans = inlineSpans(text)
         if (spans.isEmpty()) return AnnotatedString(text)
         val hidden = BooleanArray(text.length).also { flags -> spans.forEach { span -> span.markers.forEach { r -> r.forEach { if (it in flags.indices) flags[it] = true } } } }
@@ -148,7 +164,15 @@ object Markdown {
         map[text.length] = out.length
         return buildAnnotatedString {
             append(out.toString())
-            spans.forEach { span -> addStyle(inlineStyle(span.kind), map[span.whole.first], map[span.whole.last + 1]) }
+            spans.forEach { span ->
+                addStyle(inlineStyle(span.kind), map[span.whole.first], map[span.whole.last + 1])
+                // Reader mode: links open when tapped.
+                if (links && span.kind == InlineKind.LINK) {
+                    val raw = text.substring(span.whole.first, span.whole.last + 1)
+                    val url = InlineLink.matchEntire(raw)?.groupValues?.get(2) ?: raw
+                    if (url.startsWith("http://", true) || url.startsWith("https://", true)) addLink(androidx.compose.ui.text.LinkAnnotation.Url(url), map[span.whole.first], map[span.whole.last + 1])
+                }
+            }
         }
     }
 
@@ -165,13 +189,14 @@ object Markdown {
         InlineKind.BOLD -> SpanStyle(fontWeight = FontWeight.Bold)
         InlineKind.ITALIC -> SpanStyle(fontStyle = FontStyle.Italic)
         InlineKind.STRIKE -> SpanStyle(textDecoration = TextDecoration.LineThrough)
-        InlineKind.CODE -> SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x33FFFFFF))
+        InlineKind.CODE -> SpanStyle(fontFamily = FontFamily.Monospace, background = veil(.2f))
         InlineKind.LINK -> SpanStyle(color = TodoBlue, textDecoration = TextDecoration.Underline)
     }
 
     /** One line as plain words: list/heading/quote markers and inline markers removed. */
     fun plain(line: String): String {
         val trimmed = line.trim()
+        FileLine.find(trimmed)?.let { return "📎 " + it.groupValues[1] }
         if (ImageLine.matches(trimmed) || RuleLine.matches(trimmed) || (TableSeparator.matches(trimmed) && trimmed.contains('-'))) return ""
         if (trimmed.startsWith("|")) return tableRows(listOf(trimmed)).firstOrNull().orEmpty().filter { it.isNotBlank() }.joinToString(" · ") { it.replace("\n", " ") }
         val body = NoteBlocks.classify(line).let { if (it.kind == BlockKind.PARAGRAPH) trimmed else it.text.trim() }
@@ -205,7 +230,7 @@ private val InlineItalic = Regex("""(?<![*\w])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![
 private val BareUrl = Regex("""https?://[^\s)]+""")
 
 /** The kinds of block the note editor shows; the stored text stays plain markdown. */
-enum class BlockKind { PARAGRAPH, HEADING, BULLET, NUMBERED, CHECK, QUOTE, DIVIDER, IMAGE, TABLE;
+enum class BlockKind { PARAGRAPH, HEADING, BULLET, NUMBERED, CHECK, QUOTE, DIVIDER, IMAGE, TABLE, FILE;
     val isText get() = this in setOf(PARAGRAPH, HEADING, BULLET, NUMBERED, CHECK, QUOTE)
     val isList get() = this in setOf(BULLET, NUMBERED, CHECK, QUOTE)
 }
@@ -249,6 +274,8 @@ object NoteBlocks {
             trimmed.isEmpty() -> NoteBlock(newId(), BlockKind.PARAGRAPH, line)
             RuleLine.matches(trimmed) -> NoteBlock(newId(), BlockKind.DIVIDER, raw = line)
             ImageLine.matches(trimmed) -> NoteBlock(newId(), BlockKind.IMAGE, ImageLine.find(trimmed)!!.groupValues[1], raw = line)
+            // An attachment keeps its file name in [NoteBlock.text] and its stored path in [NoteBlock.prefix].
+            FileLine.matches(trimmed) -> FileLine.find(trimmed)!!.groupValues.let { g -> NoteBlock(newId(), BlockKind.FILE, g[1], g[2], raw = line) }
             HeadingPrefix.matches(line) -> text(BlockKind.HEADING, HeadingPrefix.find(line)!!)
             CheckPrefix.matches(line) -> text(BlockKind.CHECK, CheckPrefix.find(line)!!)
             BulletPrefix.matches(line) -> text(BlockKind.BULLET, BulletPrefix.find(line)!!)
@@ -282,6 +309,7 @@ object NoteBlocks {
         when (block.kind) {
             BlockKind.DIVIDER -> block.raw ?: "---"
             BlockKind.IMAGE -> block.raw ?: "![](${block.text})"
+            BlockKind.FILE -> block.raw ?: "[📎 ${block.text}](${block.prefix})"
             BlockKind.TABLE -> block.raw ?: block.rows.let { rows ->
                 val width = rows.maxOfOrNull { it.size }?.coerceAtLeast(1) ?: 1
                 fun line(cells: List<String>) = "| " + (0 until width).joinToString(" | ") { cells.getOrNull(it).orEmpty().replace("|", "/").replace("\n", "<br>") } + " |"
@@ -443,6 +471,7 @@ fun MarkdownText(source: String, modifier: Modifier = Modifier, maxBlocks: Int =
                     }
                 }
                 MdBlock.Rule -> HorizontalDivider(color = TodoBorder, modifier = Modifier.padding(vertical = 4.dp))
+                is MdBlock.File -> AttachmentChip(block.name, block.path, compact = true, clickable = false)
                 is MdBlock.Image -> {
                     val bitmap = rememberSavedBitmap(block.path)
                     if (bitmap != null) {
@@ -504,11 +533,11 @@ fun NoteToolbar(actions: List<Pair<String, () -> Unit>>, active: Set<String> = e
     }
 }
 
-private val ToolbarIcons = mapOf("•" to ZenIcon.Lines, "☐" to ZenIcon.Checkbox, "❝" to ZenIcon.Quote, "🖼" to ZenIcon.Picture, "―" to ZenIcon.Minus, "▦" to ZenIcon.Table, "✎" to ZenIcon.Pencil)
+private val ToolbarIcons = mapOf("•" to ZenIcon.Lines, "☐" to ZenIcon.Checkbox, "❝" to ZenIcon.Quote, "🖼" to ZenIcon.Picture, "―" to ZenIcon.Minus, "▦" to ZenIcon.Table, "✎" to ZenIcon.Pencil, "📎" to ZenIcon.Paperclip)
 
 private class DoodleStroke(val color: Color, val points: List<Offset>)
 
-private val DoodleColors = listOf(Color(0xFFEDEAE3), Color(0xFFB4CDBF), Color(0xFFD9BC8C), Danger, Color(0xFF9DB7D0))
+private val DoodleColors = listOf(Color(0xFFEDEAE3), Color(0xFFB4CDBF), Color(0xFFD9BC8C), Color(0xFFDE8E80), Color(0xFF9DB7D0))
 private val DoodlePaper = Color(0xFF1C1C1A)
 
 /** Freehand drawing pad; "Done" saves it as a PNG and hands back its path. */

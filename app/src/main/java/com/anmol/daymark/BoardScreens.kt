@@ -215,7 +215,7 @@ private fun SingleColumnBoardScreen(
     val scope = rememberCoroutineScope()
     LaunchedEffect(selectedColumnId, columns.size) {
         val page = columns.indexOfFirst { it.id == selectedColumnId }
-        if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page)
+        if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page, animationSpec = PageSpring)
     }
     LaunchedEffect(pagerState, columns.size) {
         androidx.compose.runtime.snapshotFlow { pagerState.currentPage }.collect { page ->
@@ -235,12 +235,13 @@ private fun SingleColumnBoardScreen(
         Text(workspaceSubtitle(workspace, snapshot.cardsFor(workspace)), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(start = 18.dp, top = 5.dp, bottom = 3.dp))
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             DropdownChoice(label = columns.getOrNull(pagerState.currentPage)?.name ?: columns.first().name, choices = columns.map { it.name }) { name ->
-                columns.firstOrNull { it.name == name }?.let { target -> scope.launch { pagerState.animateScrollToPage(columns.indexOf(target)) } }
+                columns.firstOrNull { it.name == name }?.let { target -> scope.launch { pagerState.animateScrollToPage(columns.indexOf(target), animationSpec = PageSpring) } }
             }
             TextButton(onClick = onAddColumn, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)) { Text("Add column", color = Green, fontSize = 12.sp) }
         }
         HorizontalPager(
             state = pagerState,
+            flingBehavior = rubberFling(pagerState),
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 14.dp),
             pageSpacing = 12.dp,
@@ -255,7 +256,7 @@ private fun SingleColumnBoardScreen(
             columns = columns,
             currentPage = pagerState.currentPage,
             darkTheme = true,
-            onSelectPage = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+            onSelectPage = { page -> scope.launch { pagerState.animateScrollToPage(page, animationSpec = PageSpring) } },
             onAddColumn = onAddColumn
         )
     }
@@ -456,13 +457,14 @@ private fun HabitHistory(card: BoardCard, today: Long, onToggleDay: (Long) -> Un
                     val day = weekStart + week * 7 + weekday
                     val future = day > today
                     val checked = card.checkedOn(day)
+                    val shape = checkShape(checked)
                     Box(
-                        Modifier.size(22.dp).clip(CircleShape)
+                        Modifier.size(22.dp).clip(shape)
                             .background(if (checked) Green else Color.Transparent)
-                            .border(if (day == today) 2.dp else 1.dp, if (day == today) Ink else Muted.copy(alpha = if (checked || future) 0f else .45f), CircleShape)
+                            .border(if (day == today) 2.dp else 1.dp, if (day == today) Ink else Muted.copy(alpha = if (checked || future) 0f else .45f), shape)
                             .clickable(enabled = !future) { onToggleDay(day) },
                         contentAlignment = Alignment.Center
-                    ) { if (checked) Glyph(ZenIcon.Check, Color.White, 12.dp) }
+                    ) { if (checked) Glyph(ZenIcon.Check, OnFill, 12.dp) }
                 }
             }
         }

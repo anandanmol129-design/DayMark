@@ -15,7 +15,7 @@ internal data class Removed(
 ) {
     /** Image files owned by the removed cards: a save's picture and pictures embedded in note text. */
     val files: List<String>
-        get() = cards.flatMap { (_, card) -> listOf(card.imagePath) + Markdown.imagePaths(card.details) }.filter { it.isNotBlank() }.distinct()
+        get() = cards.flatMap { (_, card) -> listOf(card.imagePath) + Markdown.filePaths(card.details) }.filter { it.isNotBlank() }.distinct()
 }
 
 /** Takes the given cards, columns and pages out, remembering where each one sat. */

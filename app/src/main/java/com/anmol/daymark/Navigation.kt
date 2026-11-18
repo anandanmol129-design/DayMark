@@ -1,5 +1,7 @@
 package com.anmol.daymark
 
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -64,12 +66,12 @@ internal fun WorkspaceNavigation(selected: Workspace?, darkTheme: Boolean, calen
     val tabs = listOf<Workspace?>(null, Workspace.TODOS, Workspace.CALENDAR, Workspace.NOTES, Workspace.TRACK)
     val index = tabs.indexOf(selected).coerceAtLeast(0)
     Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Surface(color = TodoNav, shape = island, border = GlassStroke, shadowElevation = 10.dp, modifier = Modifier.weight(1f).glassBlur(island)) {
+        Surface(color = TodoNav, shape = island, border = GlassStroke, shadowElevation = if (Look.light) 4.dp else 10.dp, modifier = Modifier.weight(1f).glassBlur(island)) {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(5.dp)) {
                 val slot = maxWidth / tabs.size
                 // One soft pill glides between tabs on a spring, like iOS segmented controls.
                 val pillX by animateDpAsState(slot * index, spring(dampingRatio = .78f, stiffness = Spring.StiffnessMediumLow), label = "navPill")
-                Box(Modifier.offset(x = pillX).width(slot).height(54.dp).clip(RoundedCornerShape(25.dp)).background(Color(0x1FFFFFFF)))
+                Box(Modifier.offset(x = pillX).width(slot).height(54.dp).clip(RoundedCornerShape(25.dp)).background(if (Look.light) Look.accent.container else veil(0.12f)))
                 Row(Modifier.fillMaxWidth()) {
                     tabs.forEachIndexed { i, workspace ->
                         val notes = workspace == Workspace.NOTES
@@ -86,11 +88,12 @@ internal fun WorkspaceNavigation(selected: Workspace?, darkTheme: Boolean, calen
             }
         }
         Spacer(Modifier.width(10.dp))
+        val fab = if (Look.light) RoundedCornerShape(22.dp) else CircleShape
         Surface(
-            color = CalendarBlue, shape = CircleShape, shadowElevation = 10.dp,
-            modifier = Modifier.size(60.dp).clip(CircleShape).clickable(onClick = onCreate).semantics { contentDescription = "Create" }
+            color = CalendarBlue, shape = fab, shadowElevation = if (Look.light) 4.dp else 10.dp,
+            modifier = Modifier.size(60.dp).clip(fab).clickable(onClick = onCreate).semantics { contentDescription = "Create" }
         ) {
-            Box(contentAlignment = Alignment.Center) { Glyph(ZenIcon.Plus, Color.White, 26.dp) }
+            Box(contentAlignment = Alignment.Center) { Glyph(ZenIcon.Plus, OnFill, 26.dp) }
         }
     }
 }
@@ -99,15 +102,51 @@ internal fun WorkspaceNavigation(selected: Workspace?, darkTheme: Boolean, calen
 @Composable
 private fun NavigationItem(workspace: Workspace?, selected: Boolean, modifier: Modifier, private: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val label = if (private) "Private" else when (workspace) { null -> "Today"; Workspace.TODOS -> "Inbox"; else -> workspace.title }
-    val tint by animateColorAsState(if (private) Amber else if (selected) TodoText else TodoMuted.copy(alpha = .8f), tween(240), label = "navTint")
+    val tint by animateColorAsState(if (private) Amber else if (selected) (if (Look.light) TodoBlue else TodoText) else TodoMuted.copy(alpha = .8f), tween(240), label = "navTint")
     val lift by animateFloatAsState(if (selected) 1f else .94f, spring(dampingRatio = .5f, stiffness = Spring.StiffnessMedium), label = "navLift")
+    val icon = if (private) ZenIcon.Lock else workspace?.icon ?: ZenIcon.Sun
+    // Each tap plays a little animation that suits the icon (see tapMotion).
+    val tap = remember { androidx.compose.animation.core.Animatable(1f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun play() {
+        scope.launch {
+            tap.snapTo(0f)
+            tap.animateTo(1f, tween(if (icon == ZenIcon.Calendar) 560 else 520, easing = androidx.compose.animation.core.LinearEasing))
+        }
+    }
     Column(
-        modifier.height(54.dp).clip(RoundedCornerShape(25.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick).semantics { contentDescription = label },
+        modifier.height(54.dp).clip(RoundedCornerShape(25.dp))
+            .combinedClickable(onClick = { play(); onClick() }, onLongClick = onLongClick?.let { long -> { play(); long() } })
+            .semantics { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
     ) {
-        androidx.compose.animation.Crossfade(if (private) ZenIcon.Lock else workspace?.icon ?: ZenIcon.Sun, label = "navIcon") { icon -> Glyph(icon, tint, 22.dp, modifier = Modifier.scale(lift)) }
+        androidx.compose.animation.Crossfade(icon, label = "navIcon") { shown ->
+            Glyph(shown, tint, 22.dp, modifier = Modifier.scale(lift).graphicsLayer { tapMotion(shown, tap.value) })
+        }
         Spacer(Modifier.height(3.dp))
         Text(label, color = tint, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, letterSpacing = .2.sp, maxLines = 1)
+    }
+}
+
+private const val NavTau = (2 * Math.PI).toFloat()
+// Overshoots a little past the end, then settles.
+private val Overshoot = androidx.compose.animation.core.CubicBezierEasing(.34f, 1.56f, .64f, 1f)
+
+/**
+ * The tap animation for a bottom-bar icon, at [t] from 0 to 1: the sun turns, the inbox tray
+ * bounces as if something dropped in, the calendar page flips over, the note wiggles, the habit
+ * grid pops and the lock shakes.
+ */
+private fun androidx.compose.ui.graphics.GraphicsLayerScope.tapMotion(icon: ZenIcon, t: Float) {
+    if (t >= 1f) return
+    val fade = 1f - t
+    when (icon) {
+        ZenIcon.Sun -> rotationZ = 90f * Overshoot.transform(t) // the rays repeat every 45°, so it ends looking unturned
+        ZenIcon.Inbox -> translationY = 6.dp.toPx() * kotlin.math.abs(kotlin.math.sin(NavTau * t)) * fade
+        ZenIcon.Calendar -> { rotationX = 360f * androidx.compose.animation.core.FastOutSlowInEasing.transform(t); cameraDistance = 8f * density }
+        ZenIcon.Note -> rotationZ = 14f * kotlin.math.sin(NavTau * 1.5f * t) * fade
+        ZenIcon.Lock -> translationX = 3.dp.toPx() * kotlin.math.sin(NavTau * 3f * t) * fade
+        else -> { val pop = 1f + .28f * kotlin.math.sin(Math.PI.toFloat() * t) * fade; scaleX = pop; scaleY = pop; rotationZ = -8f * kotlin.math.sin(NavTau * t) * fade }
     }
 }
 
@@ -151,12 +190,24 @@ internal fun PageTitle(name: String, deletable: Boolean, onDelete: () -> Unit, m
     var menu by remember { mutableStateOf(false) }
     Box(modifier) {
         Text(
-            name, color = TodoText, fontSize = size, fontWeight = if (size > 30.sp) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            name, color = TodoText, fontSize = size, fontWeight = if (size > 30.sp) (if (Look.light) FontWeight.Black else FontWeight.Bold) else if (Look.light) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(enabled = deletable || onEdit != null) { menu = true }
         )
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
             if (deletable) DropdownMenuItem(text = { Text("Delete page", color = Danger) }, onClick = { menu = false; onDelete() })
         }
+    }
+}
+
+/** Search, floating just above the + button where a thumb can reach it; opens the same search as the header button. */
+@Composable
+internal fun FloatingSearchButton() {
+    Surface(
+        color = TodoNav, shape = CircleShape, border = GlassStroke, shadowElevation = 10.dp,
+        modifier = Modifier.size(52.dp).glassBlur(CircleShape).clip(CircleShape)
+            .clickable(onClick = LocalOpenSearch.current).semantics { contentDescription = "Search" }
+    ) {
+        Box(contentAlignment = Alignment.Center) { Glyph(ZenIcon.Search, TodoText, 22.dp) }
     }
 }

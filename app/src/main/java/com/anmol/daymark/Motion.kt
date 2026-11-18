@@ -107,3 +107,48 @@ internal fun Modifier.breathe(): Modifier {
     )
     return graphicsLayer { scaleX = s; scaleY = s }
 }
+
+/** Half of a tab flip: the old screen turns away, then the new one turns in. */
+private const val FlipHalfMs = 190
+
+/**
+ * Turns a tab's screen like a card when switching tabs. The old screen speeds up as it turns
+ * edge-on, then the new one swings in from the other side and eases to a stop. [forward] is
+ * true when moving right along the tab bar.
+ */
+@Composable
+internal fun androidx.compose.animation.AnimatedVisibilityScope.flip(forward: Boolean): Modifier {
+    val angle by transition.animateFloat(
+        transitionSpec = {
+            if (targetState == androidx.compose.animation.EnterExitState.Visible) androidx.compose.animation.core.tween(FlipHalfMs, delayMillis = FlipHalfMs, easing = androidx.compose.animation.core.LinearOutSlowInEasing)
+            else androidx.compose.animation.core.tween(FlipHalfMs, easing = androidx.compose.animation.core.FastOutLinearInEasing)
+        },
+        label = "flip"
+    ) { state ->
+        when (state) {
+            androidx.compose.animation.EnterExitState.PreEnter -> if (forward) 90f else -90f
+            androidx.compose.animation.EnterExitState.Visible -> 0f
+            androidx.compose.animation.EnterExitState.PostExit -> if (forward) -90f else 90f
+        }
+    }
+    return Modifier.graphicsLayer {
+        rotationY = angle
+        cameraDistance = 16f * density
+        // Sink back a touch as it turns, and hide it while edge-on (the waiting screen sits there).
+        val turned = kotlin.math.abs(angle) / 90f
+        scaleX = 1f - .08f * turned
+        scaleY = 1f - .08f * turned
+        alpha = if (turned >= .99f) 0f else 1f
+    }
+}
+
+/**
+ * Moving between pages inside a tab: a spring that starts slow, speeds up, then overshoots a
+ * little and settles back, like a rubber band.
+ */
+internal val PageSpring = spring<Float>(dampingRatio = .62f, stiffness = 260f)
+
+/** Swipes settle onto the next page with the same rubber-band spring. */
+@Composable
+internal fun rubberFling(state: androidx.compose.foundation.pager.PagerState) =
+    androidx.compose.foundation.pager.PagerDefaults.flingBehavior(state, snapAnimationSpec = PageSpring)

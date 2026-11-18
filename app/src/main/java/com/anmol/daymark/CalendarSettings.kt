@@ -119,7 +119,7 @@ internal fun CalendarSettingsScreen(snapshot: BoardSnapshot, snackbar: SnackbarH
             .drawBehind {
                 drawRect(TodoBackground)
                 blurred?.let { drawBlurred(it) }
-                drawRect(Color(0x590B1226))
+                drawRect(PageTint)
             }
             .pointerInput(Unit) { detectTapGestures { } }
             .statusBarsPadding()
@@ -252,7 +252,7 @@ private fun CheckMark(on: Boolean) {
     Box(
         Modifier.size(22.dp).clip(shape).background(if (on) CalendarBlue else Color.Transparent).border(1.5.dp, if (on) CalendarBlue else TodoMuted, shape),
         contentAlignment = Alignment.Center
-    ) { if (on) Glyph(ZenIcon.Check, Color.White, 14.dp) }
+    ) { if (on) Glyph(ZenIcon.Check, OnFill, 14.dp) }
 }
 
 @Composable

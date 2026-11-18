@@ -50,7 +50,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Home-screen widget: the open tasks of one folder, with open, folder-pick and quick-add buttons. */
+/**
+ * Tasks widget: the open tasks of one folder. Detailed: tick-to-complete rows under a header with open, settings and
+ * quick-add buttons. Compact: see [TaskCompactWidget].
+ */
 class TaskListWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, widgetIds: IntArray) {
         widgetIds.forEach { update(context, manager, it) }
@@ -86,7 +89,7 @@ class TaskListWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onDeleted(context: Context, widgetIds: IntArray) {
-        widgetIds.forEach { setFolder(context, it, null); WidgetActions.setSize(context, it, null) }
+        widgetIds.forEach { setFolder(context, it, null); WidgetLook.forget(context, it) }
     }
 
     companion object {
@@ -114,7 +117,7 @@ class TaskListWidgetProvider : AppWidgetProvider() {
 
         /** Divider, folder name with its open-task count, divider. Not tappable. */
         fun sectionHeader(context: Context, name: String, count: Int, nameSp: Float, countSp: Float): RemoteViews =
-            RemoteViews(context.packageName, R.layout.widget_section_head).apply {
+            RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_section_head)).apply {
                 setTextViewText(R.id.section_name, name)
                 setTextViewTextSize(R.id.section_name, TypedValue.COMPLEX_UNIT_SP, nameSp)
                 setTextViewText(R.id.section_count, count.toString())
@@ -128,6 +131,10 @@ class TaskListWidgetProvider : AppWidgetProvider() {
 
         fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
             val snapshot = BoardStore(context).load()
+            if (WidgetLook.begin(context, widgetId, WidgetKind.TASKS).view == WidgetView.COMPACT) {
+                manager.updateAppWidget(widgetId, TaskCompactWidget.render(context, widgetId, snapshot))
+                return
+            }
             val page = snapshot.todoPages.firstOrNull { it.id == folderFor(context, widgetId) } ?: snapshot.todoPages.first()
             val tasks = openTasksOf(snapshot, page)
             // The Inbox widget also lists every other folder that has open tasks, each under its own heading.
@@ -137,7 +144,7 @@ class TaskListWidgetProvider : AppWidgetProvider() {
 
             val size = WidgetActions.sizeFor(context, widgetId)
             val density = context.resources.displayMetrics.density
-            val views = RemoteViews(context.packageName, R.layout.widget_tasks)
+            val views = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_tasks))
             // On a very short widget (about one launcher cell) the full-size header would eat the list, so shrink it.
             // At the normal size (two cells and up) nothing changes.
             val heightDp = manager.getAppWidgetOptions(widgetId).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
@@ -157,7 +164,7 @@ class TaskListWidgetProvider : AppWidgetProvider() {
                 R.id.widget_folder,
                 PendingIntent.getActivity(
                     context, widgetId * 10 + 2,
-                    Intent(context, WidgetFolderActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId),
+                    Intent(context, WidgetSetupActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
             )
@@ -176,74 +183,25 @@ class TaskListWidgetProvider : AppWidgetProvider() {
             all.forEach { (header, task) ->
                 if (header != null) items.addItem(("section:" + header.first.id).hashCode().toLong(), sectionHeader(context, header.first.name, header.second, maxOf(12f, size.taskSp - 2f), 12f))
                 val done = task.id in ticking
-                val row = RemoteViews(context.packageName, R.layout.widget_task_item)
+                val row = RemoteViews(context.packageName, WidgetLook.layout(context, R.layout.widget_task_item))
                 row.setTextViewText(
                     R.id.widget_task_title,
                     if (!done) task.title else SpannableString(task.title).apply { setSpan(StrikethroughSpan(), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
                 )
-                row.setTextColor(R.id.widget_task_title, if (done) 0xFF8A90A6.toInt() else 0xFFF1F1F2.toInt())
+                row.setTextColor(R.id.widget_task_title, if (done) WidgetLook.pick(0xFF8A90A6.toInt(), 0xFF75685F.toInt()) else WidgetLook.pick(0xFFF1F1F2.toInt(), 0xFF221A16.toInt()))
                 row.setTextViewTextSize(R.id.widget_task_title, TypedValue.COMPLEX_UNIT_SP, size.taskSp)
                 // Keep the circle about 20dp and shrink the row around it.
                 val rowDp = if (tight) minOf(size.rowDp, 32) else size.rowDp
                 row.setViewLayoutHeight(R.id.widget_task_check, rowDp.toFloat(), TypedValue.COMPLEX_UNIT_DIP)
                 val vertical = ((rowDp - 20) / 2f * density).toInt()
                 row.setViewPadding(R.id.widget_task_check, (10 * density).toInt(), vertical, (12 * density).toInt(), vertical)
-                row.setImageViewResource(R.id.widget_task_check, if (done) R.drawable.ic_widget_check_on else R.drawable.ic_widget_check_off)
+                row.setImageViewResource(R.id.widget_task_check, WidgetLook.drawable(if (done) R.drawable.ic_widget_check_on else R.drawable.ic_widget_check_off))
                 if (!done) row.setOnClickFillInIntent(R.id.widget_task_check, Intent().putExtra(EXTRA_TASK, task.id))
                 items.addItem(task.id.hashCode().toLong(), row)
             }
             views.setRemoteAdapter(R.id.widget_tasks, items.build())
             views.setEmptyView(R.id.widget_tasks, R.id.widget_empty)
             manager.updateAppWidget(widgetId, views)
-        }
-    }
-}
-
-/** Task-list widget setup: which folder to show and how big the text is. Runs on placement and from the header. */
-class WidgetFolderActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
-        // Backing out of first-time setup still keeps the widget, with the defaults.
-        setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
-        if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) { finish(); return }
-        val snapshot = BoardStore(this).load()
-        val pages = snapshot.todoPages
-
-        setContent {
-            var folderId by remember { mutableStateOf(TaskListWidgetProvider.folderFor(this, widgetId)?.takeIf { id -> pages.any { it.id == id } } ?: pages.first().id) }
-            var size by remember { mutableStateOf(WidgetActions.sizeFor(this, widgetId)) }
-            val preview = remember(folderId) {
-                val listIds = snapshot.columns.filter { it.pageId == folderId }.map { it.id }.toSet()
-                snapshot.cards.filter { it.columnId in listIds && !it.completed }.sortedByDescending { it.createdAt }.take(3).map { it.title }
-                    .ifEmpty { listOf("Buy milk", "Call the bank") }
-            }
-            WidgetSettingsScreen(
-                size = size,
-                onSize = { size = it },
-                onDismiss = ::finish,
-                onDone = {
-                    TaskListWidgetProvider.setFolder(this, widgetId, folderId)
-                    WidgetActions.setSize(this, widgetId, size)
-                    TaskListWidgetProvider.update(this, AppWidgetManager.getInstance(this), widgetId)
-                    finish()
-                },
-                preview = {
-                    MetaLine(pages.first { it.id == folderId }.name, TodoBlue, size.headerSp.sp, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), badges = listOf(ZenIcon.ChevronDown))
-                    preview.forEach { title ->
-                        Row(Modifier.padding(horizontal = 16.dp).heightIn(min = size.rowDp.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(18.dp).border(2.dp, TodoMuted, CircleShape))
-                            Text(title, color = TodoText, fontSize = size.taskSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp))
-                        }
-                    }
-                },
-                choices = {
-                    WidgetSettingsLabel("FOLDER")
-                    LazyColumn(Modifier.heightIn(max = 220.dp)) {
-                        items(pages, key = { it.id }) { page -> WidgetChoiceRow(page.name, page.id == folderId) { folderId = page.id } }
-                    }
-                }
-            )
         }
     }
 }

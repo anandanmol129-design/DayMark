@@ -44,6 +44,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -70,8 +72,6 @@ import java.util.Locale
 internal fun DaymarkApp(
     store: BoardStore,
     resumeTick: Int,
-    backdrop: Backdrop,
-    onBackdrop: (Backdrop) -> Unit,
     widgetRequest: WidgetRequest? = null,
     onWidgetRequestHandled: () -> Unit = {}
 ) {
@@ -102,6 +102,7 @@ internal fun DaymarkApp(
     var pageToRename by remember { mutableStateOf<BoardPage?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showCalendarSettings by rememberSaveable { mutableStateOf(false) }
+    var showStorage by rememberSaveable { mutableStateOf(false) }
     var showSearch by rememberSaveable { mutableStateOf(false) }
     var viewingSave by remember { mutableStateOf<BoardCard?>(null) }
     var calendarJump by remember { mutableStateOf<Pair<Long, Int>?>(null) }
@@ -124,6 +125,7 @@ internal fun DaymarkApp(
     // Notes shows either its everyday items or, while unlocked, only the private ones.
     val boardSnapshot = remember(snapshot, privateOpen) { snapshot.copy(cards = snapshot.cards.filter { it.workspace != Workspace.NOTES || it.isPrivate == privateOpen }) }
     // Leaving Notes locks Private again.
+    FollowAccent(if (todayActive) null else workspace, privateOpen)
     LaunchedEffect(todayActive, workspace) { if (todayActive || workspace != Workspace.NOTES) PrivateVault.lock() }
 
     fun update(next: BoardSnapshot) {
@@ -348,7 +350,17 @@ internal fun DaymarkApp(
         }
     }
 
-    BackHandler(enabled = showSettings && !showCalendarSettings) { showSettings = false }
+    BackHandler(enabled = showSettings && !showCalendarSettings && !showStorage) { showSettings = false }
+    BackHandler(enabled = showStorage) { showStorage = false }
+    // Catch up on an automatic backup the background job hasn't got round to yet.
+    LaunchedEffect(Unit) {
+        AutoBackup.schedule(context)
+        if (AutoBackup.isDue(context)) {
+            val latest = withContext(BoardStore.io) { store.load() }
+            withContext(Dispatchers.IO) { runCatching { AutoBackup.runNow(context, latest) } }
+            lastBackup = Backup.lastBackupMillis(context)
+        }
+    }
     BackHandler(enabled = showCalendarSettings) { showCalendarSettings = false }
     BackHandler(enabled = showSearch) { showSearch = false }
 
@@ -445,6 +457,8 @@ internal fun DaymarkApp(
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets.statusBars,
         snackbarHost = { SnackbarHost(snackbar) },
+        // Lines up over the + at the end of the bottom bar (both sit about 44dp in from the edge).
+        floatingActionButton = { Box(Modifier.graphicsLayer { alpha = appear.value }.padding(end = 2.dp)) { FloatingSearchButton() } },
         bottomBar = {
           Box(Modifier.graphicsLayer { translationY = (1f - appear.value) * 90.dp.toPx() }) {
             WorkspaceNavigation(selected = if (todayActive) null else workspace, darkTheme = true, calendarTheme = false, privateOpen = privateOpen, onLongPressNotes = ::togglePrivate, onSelect = { if (it == null) todayActive = true else { todayActive = false; workspaceId = it.id } }, onCreate = {
@@ -469,16 +483,16 @@ internal fun DaymarkApp(
         }
     ) { insets ->
         Column(Modifier.fillMaxSize().padding(insets)) {
-          // Switching tabs slides toward the tab you picked and cross-fades.
+          // Switching tabs flips the screen like a card, turning toward the tab you picked.
+          val tab = if (todayActive) null else workspace
+          val lastTab = remember { intArrayOf(tab?.ordinal ?: -1) }
+          val flipForward = remember(tab) { ((tab?.ordinal ?: -1) > lastTab[0]).also { lastTab[0] = tab?.ordinal ?: -1 } }
           AnimatedContent(
-            targetState = if (todayActive) null else workspace,
-            transitionSpec = {
-                val forward = (targetState?.ordinal ?: -1) > (initialState?.ordinal ?: -1)
-                (fadeIn(tween(260, delayMillis = 40)) + slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { w -> if (forward) w / 7 else -w / 7 })
-                    .togetherWith(fadeOut(tween(160)) + slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { w -> if (forward) -w / 10 else w / 10 })
-            },
+            targetState = tab,
+            transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
             label = "workspace"
           ) { shown ->
+           Box(flip(flipForward)) {
             if (shown == null) TodayScreen(
                 snapshot = snapshot,
                 timerTick = timerTick,
@@ -568,6 +582,7 @@ internal fun DaymarkApp(
                 onLockPrivate = { PrivateVault.lock() }
             )
             }
+           }
           }
         }
     }
@@ -590,8 +605,7 @@ internal fun DaymarkApp(
             onShareBackup = ::shareBackup,
             onRestore = { pickBackup.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) },
             onImportCalendar = { showCalendarSettings = true },
-            backdrop = backdrop,
-            onBackdrop = onBackdrop
+            onOpenStorage = { showStorage = true }
         )
     }
 
@@ -602,6 +616,26 @@ internal fun DaymarkApp(
         exit = fadeOut(tween(180)) + slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 6 }
     ) {
         CalendarSettingsScreen(snapshot = snapshot, snackbar = snackbar, onBack = { showCalendarSettings = false })
+    }
+
+    // Settings › Storage: the biggest pictures and files, to pick and delete.
+    AnimatedVisibility(
+        visible = showStorage,
+        enter = fadeIn(tween(220)) + slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 6 },
+        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 6 }
+    ) {
+        StorageScreen(
+            snapshot = snapshot,
+            snackbar = snackbar,
+            onBack = { showStorage = false },
+            onRemoveFromNotes = { paths ->
+                update(snapshot.copy(cards = snapshot.cards.map { card ->
+                    val details = Markdown.withoutFiles(card.details, paths)
+                    if (card.imagePath !in paths && details == card.details) card
+                    else card.copy(imagePath = if (card.imagePath in paths) "" else card.imagePath, details = details)
+                }))
+            }
+        )
     }
 
     // Search covers the tab like Settings does, and closes when a result is picked.
@@ -720,8 +754,8 @@ internal fun DaymarkApp(
             onSave = { draft ->
               composerDay = null
               if (editing != null) {
-                val kept = Markdown.imagePaths(draft.details).toSet()
-                Markdown.imagePaths(editing.details).filter { it !in kept }.forEach { runCatching { java.io.File(it).delete() } }
+                val kept = Markdown.filePaths(draft.details).toSet()
+                Markdown.filePaths(editing.details).filter { it !in kept }.forEach { runCatching { java.io.File(it).delete() } }
                 // A replaced or removed cover image is deleted with it.
                 if (draft.imagePath != null && editing.imagePath.isNotBlank() && draft.imagePath != editing.imagePath) runCatching { java.io.File(editing.imagePath).delete() }
                 update(snapshot.copy(cards = snapshot.cards.map {

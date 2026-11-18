@@ -173,7 +173,7 @@ internal fun CalendarScreen(
                 val selected = day == selectedDay
                 val dots = entriesFor(cards, day).take(5)
                 val chip by animateColorAsState(if (selected) GlassAccent else TodoCard, tween(220), label = "dayChip")
-                val ring by animateColorAsState(if (selected) CalendarBlue else Color(0x33FFFFFF), tween(220), label = "dayRing")
+                val ring by animateColorAsState(if (selected) CalendarBlue else veil(0.20f), tween(220), label = "dayRing")
                 Surface(
                     color = chip,
                     shape = RoundedCornerShape(16.dp),

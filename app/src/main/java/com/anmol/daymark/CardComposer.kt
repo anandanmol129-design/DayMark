@@ -411,7 +411,7 @@ private fun SchedulePicker(initialDay: Long?, initialMinute: Int?, onDismiss: ()
                             ) {
                                 Text(
                                     date.dayOfMonth.toString(),
-                                    color = when { selected -> Color.White; YearMonth.from(date) == month -> TodoText; else -> TodoMuted.copy(alpha = .55f) },
+                                    color = when { selected -> OnFill; YearMonth.from(date) == month -> TodoText; else -> TodoMuted.copy(alpha = .55f) },
                                     fontSize = 16.sp
                                 )
                             }
@@ -508,7 +508,7 @@ internal fun RemindWarning() {
 
 @Composable
 internal fun SheetChip(label: String, color: Color, icon: ZenIcon, onClick: () -> Unit) {
-    Surface(color = Color(0x0FFFFFFF), shape = RoundedCornerShape(14.dp), border = GlassStroke, modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick)) {
+    Surface(color = veil(0.06f), shape = RoundedCornerShape(14.dp), border = GlassStroke, modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick)) {
         MetaLine(label, color, 14.sp, Modifier.padding(horizontal = 13.dp, vertical = 10.dp), leading = icon, unbounded = true)
     }
 }

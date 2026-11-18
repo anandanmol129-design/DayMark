@@ -90,7 +90,7 @@ object Backup {
     }
 
     private fun referencedImages(snapshot: BoardSnapshot): List<String> =
-        snapshot.cards.flatMap { listOf(it.imagePath) + Markdown.imagePaths(it.details) }.filter { it.isNotBlank() }.distinct()
+        snapshot.cards.flatMap { listOf(it.imagePath) + Markdown.filePaths(it.details) }.filter { it.isNotBlank() }.distinct()
 
     private fun BoardCard.withImagePaths(from: String, to: String) = copy(
         imagePath = if (imagePath.startsWith(from)) to + imagePath.removePrefix(from) else imagePath,

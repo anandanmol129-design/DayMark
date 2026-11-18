@@ -129,7 +129,7 @@ internal fun SearchScreen(snapshot: BoardSnapshot, onClose: () -> Unit, onOpen: 
             .drawBehind {
                 drawRect(TodoBackground)
                 blurred?.let { drawBlurred(it) }
-                drawRect(Color(0x590B1226))
+                drawRect(PageTint)
             }
             .pointerInput(Unit) { detectTapGestures { } }
             .statusBarsPadding()

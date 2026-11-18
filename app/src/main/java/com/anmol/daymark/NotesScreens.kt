@@ -86,6 +86,7 @@ internal fun NotesPagesScreen(
         androidx.compose.animation.AnimatedVisibility(privateOpen) { PrivateBanner(onLockPrivate) }
         HorizontalPager(
             state = pagerState,
+            flingBehavior = rubberFling(pagerState),
             modifier = Modifier.weight(1f).fillMaxWidth(),
             pageSpacing = 16.dp,
             key = { index -> pages.getOrNull(index)?.id ?: "empty" }
@@ -157,7 +158,7 @@ internal fun NotesPagesScreen(
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             pages.forEachIndexed { index, page ->
-                PagerDot(pagerState.currentPage == index) { scope.launch { pagerState.animateScrollToPage(index) } }
+                PagerDot(pagerState.currentPage == index) { scope.launch { pagerState.animateScrollToPage(index, animationSpec = PageSpring) } }
             }
         }
     }

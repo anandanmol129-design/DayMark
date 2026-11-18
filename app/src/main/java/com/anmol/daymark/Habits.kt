@@ -1,5 +1,8 @@
 package com.anmol.daymark
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import android.app.TimePickerDialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -140,8 +143,8 @@ internal fun HabitsScreen(
                     color = TodoMuted, fontSize = 15.sp, modifier = Modifier.weight(1f)
                 )
                 if (habits.isNotEmpty()) Row(Modifier.clip(RoundedCornerShape(12.dp)).background(TodoCard).padding(3.dp)) {
-                    Segment("Month", pager.targetPage == 0) { scope.launch { pager.animateScrollToPage(0) } }
-                    Segment("Year", pager.targetPage == 1) { scope.launch { pager.animateScrollToPage(1) } }
+                    Segment("Month", pager.targetPage == 0) { scope.launch { pager.animateScrollToPage(0, animationSpec = PageSpring) } }
+                    Segment("Year", pager.targetPage == 1) { scope.launch { pager.animateScrollToPage(1, animationSpec = PageSpring) } }
                 }
             }
         }
@@ -153,7 +156,7 @@ internal fun HabitsScreen(
                 Spacer(Modifier.height(16.dp))
                 GlassPill(ZenIcon.Plus, "New habit", onAdd)
             }
-        } else HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { it }) { page ->
+        } else HorizontalPager(pager, Modifier.fillMaxSize(), flingBehavior = rubberFling(pager), beyondViewportPageCount = 1, key = { it }) { page ->
             val yearView = page == 1
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
                 items(habits, key = { it.id }) { habit ->
@@ -168,10 +171,11 @@ internal fun HabitsScreen(
 
 @Composable
 private fun Segment(label: String, selected: Boolean, onClick: () -> Unit) {
-    val fill by animateColorAsState(if (selected) Color(0x26FFFFFF) else Color.Transparent, tween(200), label = "segment")
+    val fill by animateColorAsState(if (selected) (if (Look.light) CalendarBlue else veil(0.15f)) else Color.Transparent, tween(200), label = "segment")
+    val corner by animateDpAsState(if (selected && Look.light) 18.dp else 9.dp, spring(dampingRatio = .5f, stiffness = Spring.StiffnessMediumLow), label = "segmentCorner")
     Text(
-        label, color = if (selected) TodoText else TodoMuted, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        modifier = Modifier.clip(RoundedCornerShape(9.dp)).background(fill).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)
+        label, color = if (selected) (if (Look.light) OnFill else TodoText) else TodoMuted, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        modifier = Modifier.clip(RoundedCornerShape(corner)).background(fill).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)
     )
 }
 
@@ -227,7 +231,7 @@ private fun HabitCard(habit: BoardCard, today: Long, yearView: Boolean, onToggle
 @Composable
 internal fun StreakBadge(streak: Int, color: Color) {
     Row(
-        Modifier.clip(RoundedCornerShape(12.dp)).background(if (streak > 0) color.copy(alpha = .16f) else Color(0x0FFFFFFF)).padding(horizontal = 9.dp, vertical = 5.dp),
+        Modifier.clip(RoundedCornerShape(12.dp)).background(if (streak > 0) color.copy(alpha = .16f) else veil(0.06f)).padding(horizontal = 9.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Glyph(ZenIcon.Flame, if (streak > 0) color else TodoMuted, 14.dp)
@@ -244,14 +248,14 @@ private fun Stat(value: String, label: String, modifier: Modifier) {
     }
 }
 
-private val EmptySquare = Color(0x14FFFFFF)
+private val EmptySquare get() = veil(0.08f)
 
 /** One square: filled with the habit's colour when done, outlined for today, faint for days still ahead. */
 @Composable
 private fun DaySquare(size: Dp, done: Boolean, isToday: Boolean, future: Boolean, color: Color, radius: Dp, label: String? = null, onClick: () -> Unit) {
     Box(
         Modifier.size(size).clip(RoundedCornerShape(radius))
-            .background(when { done -> color; future -> Color(0x07FFFFFF); else -> EmptySquare })
+            .background(when { done -> color; future -> veil(0.03f); else -> EmptySquare })
             .then(if (isToday) Modifier.border(1.5.dp, if (done) TodoText.copy(alpha = .8f) else TodoText.copy(alpha = .55f), RoundedCornerShape(radius)) else Modifier)
             .clickable(enabled = !future, onClick = onClick),
         contentAlignment = Alignment.Center
