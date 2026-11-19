@@ -1,5 +1,9 @@
 package com.anmol.daymark
 
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -124,7 +128,7 @@ internal fun GroupedTaskListScreen(
         val reordered = ids != lastIds[0] && ids.toSet() == lastIds[0].toSet()
         lastIds[0] = ids
         val target = ids.indexOf(selectedPageId)
-        if (target >= 0 && target != pagerState.currentPage) { if (reordered) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target, animationSpec = PageSpring) }
+        if (target >= 0 && target != pagerState.currentPage && Layouts.columns(Layouts.TASKS)) { if (reordered) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target, animationSpec = PageSpring) }
     }
     LaunchedEffect(pagerState) {
         androidx.compose.runtime.snapshotFlow { pagerState.currentPage }.drop(1).collect { index ->
@@ -132,24 +136,35 @@ internal fun GroupedTaskListScreen(
             runCatching { chips.animateScrollToItem(index) }
         }
     }
-    val current = pages.getOrNull(pagerState.currentPage)
+    val columnsMode = Layouts.columns(Layouts.TASKS)
+    // List mode: every folder one under another, each as a card; the chip and title follow the folder at the top.
+    val listState = rememberLazyListState()
+    val listFolder by remember { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex } }
+    LaunchedEffect(columnsMode) {
+        if (columnsMode) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow { listFolder }.drop(1).collect { index ->
+            latestPages.value.getOrNull(index)?.let { onSelectPage(it.id) }
+            runCatching { chips.animateScrollToItem(index) }
+        }
+    }
+    val currentIndex = if (columnsMode) pagerState.currentPage else listFolder.coerceAtMost(pages.lastIndex.coerceAtLeast(0))
+    val current = pages.getOrNull(currentIndex)
 
-    val washColor by animateColorAsState(current?.let(::folderColor) ?: Color.Transparent, tween(350), label = "folderWash")
-    // The light theme keeps the whole tasks page in the tab's one colour, so folders don't wash it with their own.
-    Column(Modifier.fillMaxSize().then(if (Look.light) Modifier else Modifier.folderWashBehind(washColor))) {
-        Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.weight(1f))
-            Glyph(ZenIcon.Mic, TodoMuted, 18.dp, modifier = Modifier.clip(CircleShape).clickable(onClick = onVoice).padding(10.dp))
+    // No folder-colour wash: the page takes the tab's own glow from the backdrop, like every other tab.
+    Column(Modifier.fillMaxSize()) {
+        // The title shares the row with the header icons, so the folders and tasks sit higher up.
+        // Folders are renamed or deleted from their chip (long-press), so the title is plain text.
+        Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            PageTitle(
+                if (columnsMode) current?.name ?: "Inbox" else "Tasks",
+                deletable = false,
+                onDelete = {},
+                size = 34.sp,
+                modifier = Modifier.weight(1f)
+            )
+            LayoutToggle(Layouts.TASKS)
             SettingsButton()
         }
-        // Folders are renamed or deleted from their chip (long-press), so the title is plain text.
-        PageTitle(
-            current?.name ?: "Inbox",
-            deletable = false,
-            onDelete = {},
-            size = 34.sp,
-            modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 14.dp)
-        )
         // Folders as chips; swiping the list below moves between them too. Long-press: menu (release in place) or drag to reorder.
         val density = LocalDensity.current
         val spacingPx = with(density) { 8.dp.toPx() }
@@ -168,7 +183,7 @@ internal fun GroupedTaskListScreen(
         var dragNatural by remember { mutableFloatStateOf(0f) }
         var lastSwap by remember { mutableLongStateOf(0L) }
         val chipBounds = remember { HashMap<String, Pair<Float, Float>>() } // page id -> (left in window, width)
-        val selectedChipId = pages.getOrNull(pagerState.currentPage)?.id
+        val selectedChipId = current?.id
         /** Moves the dragged chip past a neighbour once its centre has crossed that neighbour's centre. At most one swap per 120 ms so the layout can catch up. */
         fun settleSwaps() {
             val order = dragOrder ?: return
@@ -252,23 +267,21 @@ internal fun GroupedTaskListScreen(
                     menuOpen = menuFor == page.id, onMenuDismiss = { menuFor = null },
                     lifted = dragged, offset = { if (dragged) rowRootX + fingerX - grabDx - dragNatural else 0f },
                     modifier = (if (dragged) Modifier.zIndex(1f) else Modifier.animateItem()).onGloballyPositioned { chipBounds[page.id] = it.positionInRoot().x to it.size.width.toFloat(); if (draggingId == page.id) dragNatural = it.positionInRoot().x }
-                ) { scope.launch { pagerState.animateScrollToPage(pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0), animationSpec = PageSpring) } }
+                ) {
+                    val index = pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0)
+                    scope.launch { if (columnsMode) pagerState.animateScrollToPage(index, animationSpec = PageSpring) else listState.animateScrollToItem(index) }
+                }
             }
             item(key = "new-folder") { FolderChip("+", Color.Transparent, selected = false, onClick = onNewPage) }
         }
         Spacer(Modifier.height(8.dp))
-        HorizontalPager(
-            state = pagerState,
-            flingBehavior = rubberFling(pagerState),
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            key = { index -> pages.getOrNull(index)?.id ?: "empty" }
-        ) { index ->
-            val page = pages.getOrNull(index) ?: return@HorizontalPager
+        val folderCards: @Composable (BoardPage, Boolean) -> Unit = { page, inList ->
             val listIds = allColumns.filter { it.pageId == page.id }.map { it.id }.toSet()
             TaskFolder(
                 folderId = page.id,
                 cards = cards.filter { it.columnId in listIds },
                 moveTargets = pages.filter { it.id != page.id }.mapNotNull { other -> allColumns.firstOrNull { it.pageId == other.id } },
+                inList = inList,
                 onEdit = onEditCard,
                 onComplete = onComplete,
                 onReopen = onReopen,
@@ -276,6 +289,27 @@ internal fun GroupedTaskListScreen(
                 onMove = onMoveCard,
                 onDelete = onDelete
             )
+        }
+        androidx.compose.animation.Crossfade(columnsMode, Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(260), label = "tasksLayout") { columnsShown ->
+            if (columnsShown) HorizontalPager(
+                state = pagerState,
+                flingBehavior = rubberFling(pagerState),
+                modifier = Modifier.fillMaxSize(),
+                key = { index -> pages.getOrNull(index)?.id ?: "empty" }
+            ) { index ->
+                val page = pages.getOrNull(index) ?: return@HorizontalPager
+                LazyColumn(Modifier.fillMaxSize().bounce(pagerState, index), contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp)) {
+                    item(key = page.id) { folderCards(page, false) }
+                }
+            } else LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp)) {
+                items(pages, key = { it.id }) { page ->
+                    Column(Modifier.animateItem().padding(bottom = 18.dp)) {
+                        val ids = allColumns.filter { it.pageId == page.id }.map { it.id }.toSet()
+                        SectionLabel(page.name, cards.count { it.columnId in ids && !it.completed }.takeIf { it > 0 }?.toString())
+                        folderCards(page, true)
+                    }
+                }
+            }
         }
     }
 }
@@ -290,20 +324,24 @@ private fun FolderChip(
     menuOpen: Boolean = false, onMenuDismiss: () -> Unit = {}, lifted: Boolean = false, offset: () -> Float = { 0f },
     modifier: Modifier = Modifier, onClick: () -> Unit
 ) {
-    val fill by animateColorAsState(if (selected) (if (Look.light) CalendarBlue else veil(0.20f)) else Color.Transparent, tween(220), label = "chipFill")
-    val text by animateColorAsState(if (selected) (if (Look.light) OnFill else TodoText) else TodoMuted, tween(220), label = "chipText")
+    // Just the name: the selected folder's is brighter, with a line in the tab's colour drawn in under it.
+    val text by animateColorAsState(if (selected) TodoText else TodoMuted, tween(220), label = "chipText")
+    val underline by animateFloatAsState(if (selected) 1f else 0f, spring(dampingRatio = .7f, stiffness = Spring.StiffnessMediumLow), label = "chipLine")
+    val lineColor = if (Look.light) TodoBlue else Look.accent.fill
     val lift by animateFloatAsState(if (lifted) 1.07f else 1f, tween(120), label = "chipLift")
     Box(modifier.graphicsLayer { translationX = offset(); scaleX = lift; scaleY = lift }) {
         Surface(
-            color = if (lifted) veil(0.33f) else fill,
+            color = if (lifted) veil(0.2f) else Color.Transparent, // a faint backing only while it's being dragged
             shape = RoundedCornerShape(22.dp),
-            border = BorderStroke(1.dp, if (selected || lifted) Color.Transparent else veil(0.20f)),
             shadowElevation = if (lifted) 10.dp else 0.dp,
             modifier = Modifier.clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick)
         ) {
             Text(
                 label, color = text, fontSize = 15.sp, maxLines = 1,
-                modifier = Modifier.then(if (Look.light) Modifier else Modifier.background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (selected) .34f else .16f), tint.copy(alpha = if (selected) .12f else .04f))))).padding(horizontal = 18.dp, vertical = 9.dp)
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 9.dp)
+                    .tabUnderline(underline, lineColor)
             )
         }
         DropdownMenu(expanded = menuOpen && onRename != null, onDismissRequest = onMenuDismiss) {
@@ -324,11 +362,17 @@ internal fun <T> movePage(pages: List<T>, from: Int, to: Int): List<T> {
     return pages.toMutableList().apply { add(target, removeAt(from)) }
 }
 
+/**
+ * A folder's tasks in one card: open ones first, then a wavy line and the Completed row, which opens
+ * to show the finished ones inside the same card. In the pager an empty folder gets a friendly
+ * message instead of a card; in the list ([inList]) it gets a small empty card.
+ */
 @Composable
 private fun TaskFolder(
     folderId: String,
     cards: List<BoardCard>,
     moveTargets: List<BoardColumn>,
+    inList: Boolean,
     onEdit: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
     onReopen: (BoardCard) -> Unit,
@@ -344,32 +388,37 @@ private fun TaskFolder(
     var showDone by remember(folderId) { mutableStateOf(DoneExpanded[folderId] == true) }
     val chevron by animateFloatAsState(if (showDone) 0f else -90f, tween(220), label = "doneChevron")
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 24.dp)) {
-        if (cards.isEmpty()) item(key = "empty") {
-            Column(Modifier.fillMaxWidth().padding(top = 70.dp).animateItem(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("No tasks yet", color = TodoText, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                Text("Tap + below to add one", color = TodoMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-            }
+    if (cards.isEmpty()) {
+        if (inList) SectionCard {
+            Text("No tasks yet", color = TodoMuted, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
+        } else Column(Modifier.fillMaxWidth().padding(top = 70.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("No tasks yet", color = TodoText, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Text("Tap + below to add one", color = TodoMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
         }
-        items(open, key = { it.id }) { card ->
-            TaskLine(card, moveTargets, Modifier.animateItem(), onEdit, onComplete, onReopen, onToggleImportant, onMove, onDelete)
+        return
+    }
+    SectionCard(Modifier.rise()) {
+        open.forEachIndexed { i, card ->
+            key(card.id) {
+                if (i > 0) RowDivider()
+                TaskLine(card, moveTargets, Modifier, onEdit, onComplete, onReopen, onToggleImportant, onMove, onDelete)
+            }
         }
         if (done.isNotEmpty()) {
-            item(key = "done-header") {
-                Column(Modifier.animateItem()) {
-                    if (open.isNotEmpty()) HorizontalDivider(color = veil(0.15f), modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { showDone = !showDone; DoneExpanded[folderId] = showDone }.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Completed", color = TodoMuted, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Text("  ${done.size}", color = TodoMuted.copy(alpha = .7f), fontSize = 15.sp, modifier = Modifier.weight(1f))
-                        Glyph(ZenIcon.ChevronDown, TodoMuted, 14.dp, modifier = Modifier.rotate(chevron))
-                    }
-                }
+            if (open.isNotEmpty()) WavyDivider(Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            Row(
+                Modifier.fillMaxWidth().clickable { showDone = !showDone; DoneExpanded[folderId] = showDone }.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Completed", color = TodoMuted, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text("  ${done.size}", color = TodoMuted.copy(alpha = .7f), fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Glyph(ZenIcon.ChevronDown, TodoMuted, 14.dp, modifier = Modifier.rotate(chevron))
             }
-            if (showDone) items(done, key = { it.id }) { card ->
-                TaskLine(card, moveTargets, Modifier.animateItem(), onEdit, onComplete, onReopen, onToggleImportant, onMove, onDelete)
+            if (showDone) done.forEach { card ->
+                key(card.id) {
+                    RowDivider()
+                    TaskLine(card, moveTargets, Modifier, onEdit, onComplete, onReopen, onToggleImportant, onMove, onDelete)
+                }
             }
         }
     }
@@ -405,7 +454,7 @@ private fun TaskLine(
 
     Box(modifier) {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            Modifier.fillMaxWidth()
                 .combinedClickable(onClick = { onEdit(card) }, onLongClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu = true })
                 .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.Top
@@ -489,7 +538,6 @@ internal fun TaskInboxScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Inbox", color = TodoText, fontSize = 26.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            Glyph(ZenIcon.Mic, TodoMuted, 18.dp, modifier = Modifier.clickable(onClick = onVoice).padding(horizontal = 10.dp, vertical = 8.dp))
             ViewToggle(BoardView.BOARD, onSwitchView)
             SettingsButton()
         }
@@ -511,7 +559,7 @@ internal fun TaskInboxScreen(
             key = { page -> columns[page].id }
         ) { page ->
             val column = columns[page]
-            TaskColumnPage(
+            Box(Modifier.fillMaxSize().bounce(pagerState, page)) { TaskColumnPage(
                 column = column,
                 cards = cards.filter { it.columnId == column.id },
                 columns = columns,
@@ -520,7 +568,7 @@ internal fun TaskInboxScreen(
                 onToggleImportant = onToggleImportant,
                 onMoveCard = onMoveCard,
                 onDelete = onDelete
-            )
+            ) }
         }
 
         ColumnPageIndicator(

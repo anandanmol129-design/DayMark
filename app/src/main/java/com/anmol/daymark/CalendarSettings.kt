@@ -118,7 +118,7 @@ internal fun CalendarSettingsScreen(snapshot: BoardSnapshot, snackbar: SnackbarH
         Modifier.fillMaxSize()
             .drawBehind {
                 drawRect(TodoBackground)
-                blurred?.let { drawBlurred(it) }
+                blurred?.let { drawBlurred(it) } ?: drawEdgeGlow(Look.accent.fill, EdgeGlowStrength) // the blurred backdrop already carries it
                 drawRect(PageTint)
             }
             .pointerInput(Unit) { detectTapGestures { } }

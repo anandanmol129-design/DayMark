@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.animateColorAsState
@@ -68,10 +69,7 @@ internal fun WorkspaceNavigation(selected: Workspace?, darkTheme: Boolean, calen
     Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
         Surface(color = TodoNav, shape = island, border = GlassStroke, shadowElevation = if (Look.light) 4.dp else 10.dp, modifier = Modifier.weight(1f).glassBlur(island)) {
             BoxWithConstraints(Modifier.fillMaxWidth().padding(5.dp)) {
-                val slot = maxWidth / tabs.size
-                // One soft pill glides between tabs on a spring, like iOS segmented controls.
-                val pillX by animateDpAsState(slot * index, spring(dampingRatio = .78f, stiffness = Spring.StiffnessMediumLow), label = "navPill")
-                Box(Modifier.offset(x = pillX).width(slot).height(54.dp).clip(RoundedCornerShape(25.dp)).background(if (Look.light) Look.accent.container else veil(0.12f)))
+                // No highlight behind the selected tab: its icon's colour and open transition mark it.
                 Row(Modifier.fillMaxWidth()) {
                     tabs.forEachIndexed { i, workspace ->
                         val notes = workspace == Workspace.NOTES
@@ -102,13 +100,15 @@ internal fun WorkspaceNavigation(selected: Workspace?, darkTheme: Boolean, calen
 @Composable
 private fun NavigationItem(workspace: Workspace?, selected: Boolean, modifier: Modifier, private: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val label = if (private) "Private" else when (workspace) { null -> "Today"; Workspace.TODOS -> "Inbox"; else -> workspace.title }
-    val tint by animateColorAsState(if (private) Amber else if (selected) (if (Look.light) TodoBlue else TodoText) else TodoMuted.copy(alpha = .8f), tween(240), label = "navTint")
+    val tint by animateColorAsState(if (private) Amber else if (selected) (if (Look.light) TodoBlue else Look.accent.fill) else TodoMuted.copy(alpha = .8f), tween(240), label = "navTint")
     val lift by animateFloatAsState(if (selected) 1f else .94f, spring(dampingRatio = .5f, stiffness = Spring.StiffnessMedium), label = "navLift")
     val icon = if (private) ZenIcon.Lock else workspace?.icon ?: ZenIcon.Sun
     // Each tap plays a little animation that suits the icon (see tapMotion).
     val tap = remember { androidx.compose.animation.core.Animatable(1f) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // Opening a tab plays its icon's open transition instead (see NavTransitionIcon); the tap animation is for tapping the tab you're on.
     fun play() {
+        if (!selected && icon != ZenIcon.Lock) return
         scope.launch {
             tap.snapTo(0f)
             tap.animateTo(1f, tween(if (icon == ZenIcon.Calendar) 560 else 520, easing = androidx.compose.animation.core.LinearEasing))
@@ -121,10 +121,9 @@ private fun NavigationItem(workspace: Workspace?, selected: Boolean, modifier: M
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
     ) {
         androidx.compose.animation.Crossfade(icon, label = "navIcon") { shown ->
-            Glyph(shown, tint, 22.dp, modifier = Modifier.scale(lift).graphicsLayer { tapMotion(shown, tap.value) })
+            val motion = Modifier.scale(lift).graphicsLayer { tapMotion(shown, tap.value) }
+            if (!NavTransitionIcon(shown, selected, tint, motion)) Glyph(shown, tint, 24.dp, modifier = motion)
         }
-        Spacer(Modifier.height(3.dp))
-        Text(label, color = tint, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, letterSpacing = .2.sp, maxLines = 1)
     }
 }
 
@@ -150,22 +149,22 @@ private fun androidx.compose.ui.graphics.GraphicsLayerScope.tapMotion(icon: ZenI
     }
 }
 
+/** How long Today's sun takes to open (and, played backwards, to close). Tuned by feel later. */
 /** Opens Settings from any tab's header without threading a callback through every screen. */
 internal val LocalOpenSettings = staticCompositionLocalOf<() -> Unit> { {} }
 
-/** A round glass button holding one icon; used across headers. */
+/** A bare header icon (no circle around it); the round ripple shows where it was pressed. */
 @Composable
-internal fun IconCircle(icon: ZenIcon, description: String, tint: Color = TodoText, onClick: () -> Unit) {
-    Surface(color = TodoCard, shape = CircleShape, border = GlassStroke, modifier = Modifier.size(42.dp).glassBlur(CircleShape).clip(CircleShape).clickable(onClick = onClick).semantics { contentDescription = description }) {
-        Box(contentAlignment = Alignment.Center) { Glyph(icon, tint, 19.dp) }
+internal fun HeaderIcon(icon: ZenIcon, description: String, tint: Color = TodoText, onClick: () -> Unit) {
+    Box(Modifier.size(42.dp).clip(CircleShape).clickable(onClick = onClick).semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
+        Glyph(icon, tint, 21.dp)
     }
 }
 
 @Composable
 internal fun SettingsButton() {
-    SearchButton() // search sits just left of settings on every tab
-    Spacer(Modifier.width(10.dp))
-    IconCircle(ZenIcon.Settings, "Settings", onClick = LocalOpenSettings.current)
+    Spacer(Modifier.width(2.dp))
+    HeaderIcon(ZenIcon.Settings, "Settings", onClick = LocalOpenSettings.current)
 }
 
 @Composable
@@ -200,14 +199,41 @@ internal fun PageTitle(name: String, deletable: Boolean, onDelete: () -> Unit, m
     }
 }
 
-/** Search, floating just above the + button where a thumb can reach it; opens the same search as the header button. */
+/**
+ * The line under a selected tab-like label (task folders, Month/Year): [shown] from 0 to 1 grows
+ * it out from the middle, sitting just under the text.
+ */
+internal fun Modifier.tabUnderline(shown: Float, color: Color): Modifier = drawBehind {
+    if (shown <= 0f) return@drawBehind
+    val width = size.width * shown
+    val h = 2.5.dp.toPx()
+    drawRoundRect(color, androidx.compose.ui.geometry.Offset((size.width - width) / 2, size.height + 3.dp.toPx()), androidx.compose.ui.geometry.Size(width, h), androidx.compose.ui.geometry.CornerRadius(h / 2))
+}
+
+/** Search, floating above the + button where a thumb can reach it. */
 @Composable
-internal fun FloatingSearchButton() {
+internal fun FloatingSearchButton() = FloatingRoundButton(ZenIcon.Search, "Search", LocalOpenSearch.current)
+
+/**
+ * Voice capture, between search and the + button: say a task and it lands in the to-do inbox.
+ * While [listening], the mic becomes four thin bars that move with the sound [level]; tapping
+ * again finishes.
+ */
+@Composable
+internal fun FloatingVoiceButton(listening: Boolean, level: Float, onClick: () -> Unit) =
+    FloatingRoundButton(ZenIcon.Mic, if (listening) "Stop listening" else "Add a task by voice", onClick) {
+        androidx.compose.animation.Crossfade(listening, label = "voiceButton") { on ->
+            if (on) VoiceBars(level, if (Look.light) TodoBlue else Look.accent.fill) else Glyph(ZenIcon.Mic, TodoText, 22.dp)
+        }
+    }
+
+@Composable
+private fun FloatingRoundButton(icon: ZenIcon, description: String, onClick: () -> Unit, content: @Composable () -> Unit = { Glyph(icon, TodoText, 22.dp) }) {
     Surface(
         color = TodoNav, shape = CircleShape, border = GlassStroke, shadowElevation = 10.dp,
         modifier = Modifier.size(52.dp).glassBlur(CircleShape).clip(CircleShape)
-            .clickable(onClick = LocalOpenSearch.current).semantics { contentDescription = "Search" }
+            .clickable(onClick = onClick).semantics { contentDescription = description }
     ) {
-        Box(contentAlignment = Alignment.Center) { Glyph(ZenIcon.Search, TodoText, 22.dp) }
+        Box(contentAlignment = Alignment.Center) { content() }
     }
 }

@@ -248,7 +248,7 @@ private fun SingleColumnBoardScreen(
             key = { page -> columns[page].id }
         ) { page ->
             val column = columns[page]
-            Box(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
+            Box(Modifier.fillMaxSize().bounce(pagerState, page).padding(horizontal = 4.dp)) {
                 BoardColumnCard(column, snapshot, timerTick, onMoveCard, onToggleImportant, onComplete, onHabitCheckIn, onToggleTimer, onLaunchApp, onDelete, { onAddCard(column) })
             }
         }

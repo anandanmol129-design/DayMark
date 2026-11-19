@@ -25,13 +25,13 @@
 
 **Today** opens first: what's overdue, what's on today in time order, the habits you haven't checked in yet, and what's coming tomorrow.
 
-**To-dos** live in folders (Inbox, Work, Home…), each with its own colour. Add them by typing or by voice, star the important ones, give them a date and time, and let them repeat daily, on weekdays, weekly, monthly or yearly.
+**To-dos** live in folders (Inbox, Work, Home…). Add them by typing or by voice (tap the mic and speak; four small bars move with your voice while it listens), star the important ones, give them a date and time, and let them repeat daily, on weekdays, weekly, monthly or yearly.
 
-**Calendar** shows a week strip and a timeline of the day, with tasks, events and habits together. Swipe between days, and pick which of your phone's calendars to show. Sync is two-way through Android's own calendar storage: events you make in Daymark (and, if you like, timed to-dos) are copied to one calendar you choose, such as your Google calendar, and edits go both ways. No Google sign-in is needed.
+**Calendar** shows a week strip and a timeline of the day, with tasks, events and habits together. Swipe through the days of the week, and pick which of your phone's calendars to show. Sync is two-way through Android's own calendar storage: events you make in Daymark (and, if you like, timed to-dos) are copied to one calendar you choose, such as your Google calendar, and edits go both ways. No Google sign-in is needed.
 
 **Notes** are written as pages: headings, checklists, bullets, quotes, tables, images and drawings, with an optional cover image. Crop a picture before you add it, or use it as it is. Attach any other file too, such as a PDF, a voice recording, a video or a document; tap it to open it in another app. Notes can be kept in colour-coded folders.
 
-Tap the book icon to read a note in **reader mode**: the keyboard stays away while you scroll, checkboxes and links still work, and a bar at the bottom sets the font (Sans, Serif or Mono) and text size.
+The cover, reader and Done buttons sit at the bottom right, above the formatting bar. Tap the book to read a note in **reader mode**: the keyboard stays away while you scroll, checkboxes and links still work, and a bar at the bottom sets the font (Sans, Serif or Mono) and text size.
 
 **Saved** collects links, text and images shared from other apps through the Android share sheet. Links get their title and preview image, and you can add a comment of your own to anything you save.
 
@@ -69,11 +69,17 @@ Each widget has its own settings page: choose its view, light or dark, an accent
 
 ### Light and dark
 
-Daymark starts in a calm dark look. Switch to **Light** in Settings › Appearance for a bright Material 3 Expressive theme: a warm cream background with a colour for each tab (pink Today, coral To-dos, blue Calendar, sunflower Notes, mint Habits), checkboxes that spring into a scalloped shape when ticked, and a wavy bar under Today showing how much of the day is done. Tabs flip like cards as you switch between them, and the bottom bar's icons each play a small animation when tapped.
+Daymark starts in a calm dark look. Switch to **Light** in Settings › Appearance for a bright Material 3 Expressive theme: white pages and cards, with a colour for each tab (pink Today, coral To-dos, blue Calendar, sunflower Notes, mint Habits) on its buttons and icons and glowing in from the top and bottom of the screen. Checkboxes spring into a scalloped shape when ticked, and a wavy bar under Today shows how much of the day is done.
+
+### Moving around
+
+- Swipe sideways to move between tabs. Inside a tab, the swipe goes through its own pages first (folders, Today's sections, Month and Year).
+- Each tab's icon in the bottom bar plays its own little scene as you open it: the sun spins its rays out straight, pages drop into the inbox, the desk calendar turns to show today's date, the note flips over and fills, and the habit boxes get ticked off. Leaving a tab plays it back the other way.
+- Today, To-dos, Calendar and Notes can each be shown as one list or as columns, one page per section, folder or day.
 
 ### Also
 
-- Search across everything from any tab, with a search button just above +.
+- Search across everything from any tab, with a search button above + (and voice just below it).
 - Undo after any delete.
 - Back up to a single file, share it to Drive, email or any app, and restore it on another phone.
 - Automatic backups, daily or weekly, to a folder you choose (on the phone, an SD card or a cloud folder). The newest five are kept.
@@ -83,7 +89,7 @@ Daymark starts in a calm dark look. Switch to **Light** in Settings › Appearan
 
 Daymark has no account, no analytics and no ads. Your data is stored in the app's private storage on your phone and nowhere else.
 
-The app uses the internet for one thing only: fetching the title and preview image of a link you save. It asks for calendar access only when you choose calendars to show or turn on sync.
+The app uses the internet for one thing only: fetching the title and preview image of a link you save. It asks for calendar access only when you choose calendars to show or turn on sync. It asks for the microphone the first time you add a task by voice; what you say is turned into text by your phone's own speech service (usually Google's), as with any voice typing.
 
 ## Install
 
@@ -107,8 +113,9 @@ The app is written in Kotlin with Jetpack Compose. The sources are in `app/src/m
 
 | Area | Files |
 | --- | --- |
-| App state and navigation | `DaymarkApp.kt`, `Navigation.kt` |
+| App state and navigation | `DaymarkApp.kt`, `Navigation.kt`, `NavIcons.kt`, `Layouts.kt` |
 | Data model and storage | `BoardModels.kt`, `Backup.kt`, `AutoBackup.kt`, `Attachments.kt` |
+| Voice input | `Voice.kt` |
 | Screens | `Today.kt`, `TodoScreens.kt`, `CalendarScreen.kt`, `NotesScreens.kt`, `NoteEditor.kt`, `SavedGrid.kt`, `Habits.kt`, `SettingsScreen.kt`, `StorageScreen.kt`, `Search.kt` |
 | Reminders and alarms | `Reminders.kt`, `AlarmRinging.kt`, `ReminderSettings.kt` |
 | Calendar sync | `CalendarSync.kt`, `CalendarSettings.kt` |

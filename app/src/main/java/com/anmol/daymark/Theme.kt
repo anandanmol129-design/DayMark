@@ -67,11 +67,11 @@ private inline fun pick(dark: Color, light: () -> Color) = if (Look.light) light
 internal fun veil(alpha: Float) = if (Look.light) Color(0xFF2A1F1A).copy(alpha = alpha * .7f) else Color.White.copy(alpha = alpha)
 
 // Dark: Zen palette (warm ink, paper-white text, one calm sage accent and a sand highlight).
-// Light: Sorbet (warm cream, near-black ink, white cards and the current tab's bright accent).
+// Light: Sorbet (white page and cards, near-black ink; the tab's colour only on buttons, icons and the page's edge glow).
 // The old names stay so every screen picks the palette up without renaming.
-internal val TodoBackground get() = pick(Color(0xFF141413)) { Color(0xFFFFF8F1) }
-internal val TodoCard get() = pick(Color(0x17FFFFFF)) { lerp(Color.White, Look.accent.container, .35f) }
-internal val TodoCardRaised get() = pick(Color(0x24FFFFFF)) { Look.accent.container }
+internal val TodoBackground get() = pick(Color(0xFF141413)) { Color.White }
+internal val TodoCard get() = pick(Color(0x17FFFFFF)) { Color.White }
+internal val TodoCardRaised get() = pick(Color(0x24FFFFFF)) { Color(0xFFF1F1F1) } // neutral grey: tracks, table headers, placeholders
 internal val TodoBorder get() = pick(Color(0x1FFFFFFF)) { Color(0x1A2A1F1A) }
 internal val TodoText get() = pick(Color(0xFFEDEAE3)) { Color(0xFF221A16) }
 internal val TodoMuted get() = pick(Color(0xFFA39F96)) { Color(0xFF75685F) }
@@ -85,7 +85,7 @@ internal val Amber get() = pick(Color(0xFFD9BC8C)) { Color(0xFFE07B00) }        
 internal val Blue get() = TodoBlue
 internal val Danger get() = pick(Color(0xFFDE8E80)) { Color(0xFFE5303A) }       // overdue and delete
 internal val SheetSolid get() = pick(Color(0xFF1C1C1A)) { Color(0xFFFFFBF7) }   // opaque bottom sheets
-internal val SheetRaised get() = pick(Color(0xFF262624)) { Look.accent.container }
+internal val SheetRaised get() = pick(Color(0xFF262624)) { Color(0xFFF1F1F1) }
 internal val OnAccent get() = pick(Color(0xFF14201A)) { Look.accent.onFill }    // text and ticks drawn on a filled accent
 /** Ticks and icons drawn on [CalendarBlue] (white on the dark theme's deep sage). */
 internal val OnFill get() = pick(Color.White) { Look.accent.onFill }

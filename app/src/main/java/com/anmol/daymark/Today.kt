@@ -183,38 +183,9 @@ internal fun TodayScreen(
     val nowMinute = now.hour * 60 + now.minute
     val agenda = remember(snapshot.cards, today, nowMinute) { todayAgenda(snapshot, today, nowMinute) }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item(key = "header") {
-            Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(todayLabel(), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
-                    SettingsButton()
-                }
-                Text(
-                    "Today", color = TodoText, fontSize = if (Look.light) 44.sp else 34.sp, fontWeight = if (Look.light) FontWeight.Black else FontWeight.Bold,
-                    letterSpacing = if (Look.light) (-1).sp else 0.sp, modifier = Modifier.padding(top = 6.dp)
-                )
-                Text(agenda.summary(), color = TodoMuted, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp))
-                val doable = remember(agenda) { (agenda.timed + agenda.untimed + agenda.habits).filter { it.card.kind == CardKind.TASK || it.card.kind == CardKind.HABIT } }
-                DayProgress(doable.count { it.done }, doable.size, Modifier.fillMaxWidth().padding(top = 14.dp, end = 6.dp))
-            }
-        }
-        if (agenda.empty && !agenda.hasUpcoming) {
-            item(key = "empty") { AllClear(Modifier.fillParentMaxHeight(.55f)) }
-            return@LazyColumn
-        }
-        if (agenda.clear) item(key = "clear") {
-            Panel(Modifier.padding(horizontal = 14.dp).padding(bottom = 14.dp)) {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Glyph(ZenIcon.Check, TodoBlue, 26.dp)
-                    Column(Modifier.padding(start = 14.dp)) {
-                        Text("All clear for today", color = TodoText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Tap + to add something", color = TodoMuted, fontSize = 13.sp)
-                    }
-                }
-            }
-        }
-        if (agenda.overdue.isNotEmpty()) item(key = "overdue") {
+    // Each section of the day, in order; shown one under another (list) or one per page (columns).
+    val parts = buildList {
+        if (agenda.overdue.isNotEmpty()) add(TodayPart("overdue", "Overdue", false) {
             Section("OVERDUE", agenda.overdue.size.toString(), Late) {
                 agenda.overdue.forEachIndexed { i, card ->
                     if (i > 0) RowDivider()
@@ -227,8 +198,8 @@ internal fun TodayScreen(
                     )
                 }
             }
-        }
-        if (agenda.timed.isNotEmpty() || agenda.untimed.isNotEmpty()) item(key = "today") {
+        })
+        if (agenda.timed.isNotEmpty() || agenda.untimed.isNotEmpty()) add(TodayPart("today", "Today", false) {
             val hasTimes = agenda.timed.isNotEmpty()
             val open = agenda.timed.count { !it.done } + agenda.untimed.count { !it.done }
             Section("TODAY", if (open > 0) open.toString() else null, TodoMuted) {
@@ -249,8 +220,8 @@ internal fun TodayScreen(
                     )
                 }
             }
-        }
-        if (agenda.habits.isNotEmpty()) item(key = "habits") {
+        })
+        if (agenda.habits.isNotEmpty()) add(TodayPart("habits", "Habits", false) {
             Section("HABITS", agenda.habitsLeft.takeIf { it > 0 }?.toString(), TodoMuted) {
                 agenda.habits.forEachIndexed { i, entry ->
                     if (i > 0) RowDivider()
@@ -266,8 +237,8 @@ internal fun TodayScreen(
                     )
                 }
             }
-        }
-        if (agenda.running.isNotEmpty()) item(key = "running") {
+        })
+        if (agenda.running.isNotEmpty()) add(TodayPart("running", "Running", false) {
             Section("RUNNING", null, TodoMuted) {
                 agenda.running.forEachIndexed { i, card ->
                     if (i > 0) RowDivider()
@@ -280,8 +251,8 @@ internal fun TodayScreen(
                     )
                 }
             }
-        }
-        if (agenda.important.isNotEmpty()) item(key = "important") {
+        })
+        if (agenda.important.isNotEmpty()) add(TodayPart("important", "Important", false) {
             Section("IMPORTANT, NO DATE", null, TodoMuted) {
                 agenda.important.forEachIndexed { i, card ->
                     if (i > 0) RowDivider()
@@ -293,10 +264,8 @@ internal fun TodayScreen(
                     )
                 }
             }
-        }
-        if (agenda.tomorrow.isNotEmpty()) {
-            item(key = "divider-tomorrow") { DayDivider() }
-            item(key = "tomorrow") {
+        })
+        if (agenda.tomorrow.isNotEmpty()) add(TodayPart("tomorrow", "Tomorrow", true) {
                 val hasTimes = agenda.tomorrow.any { it.minute != null }
                 Section("TOMORROW", agenda.tomorrow.count { !it.done }.takeIf { it > 0 }?.toString(), TodoMuted) {
                     agenda.tomorrow.forEachIndexed { i, entry ->
@@ -304,11 +273,8 @@ internal fun TodayScreen(
                         UpcomingRow(entry, hasTimes, onEdit, onDelete, onComplete, onReopen)
                     }
                 }
-            }
-        }
-        if (agenda.week.isNotEmpty()) {
-            item(key = "divider-week") { DayDivider() }
-            item(key = "week") {
+        })
+        if (agenda.week.isNotEmpty()) add(TodayPart("week", agenda.weekLabel.lowercase().replaceFirstChar { it.uppercase() }, true) {
                 Section(agenda.weekLabel, agenda.week.sumOf { (_, list) -> list.count { !it.done } }.takeIf { it > 0 }?.toString(), TodoMuted) {
                     agenda.week.forEachIndexed { i, (day, entries) ->
                         if (i > 0) RowDivider()
@@ -320,10 +286,78 @@ internal fun TodayScreen(
                         entries.forEach { entry -> UpcomingRow(entry, hasTimes, onEdit, onDelete, onComplete, onReopen) }
                     }
                 }
+        })
+    }
+    val header: @Composable () -> Unit = {
+        Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(todayLabel(), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
+                LayoutToggle(Layouts.TODAY)
+                SettingsButton()
+            }
+            Text(
+                "Today", color = TodoText, fontSize = if (Look.light) 44.sp else 34.sp, fontWeight = if (Look.light) FontWeight.Black else FontWeight.Bold,
+                letterSpacing = if (Look.light) (-1).sp else 0.sp, modifier = Modifier.padding(top = 6.dp)
+            )
+            Text(agenda.summary(), color = TodoMuted, fontSize = 15.sp, modifier = Modifier.padding(top = 2.dp))
+            val doable = remember(agenda) { (agenda.timed + agenda.untimed + agenda.habits).filter { it.card.kind == CardKind.TASK || it.card.kind == CardKind.HABIT } }
+            DayProgress(doable.count { it.done }, doable.size, Modifier.fillMaxWidth().padding(top = 14.dp, end = 6.dp))
+        }
+    }
+    val clearPanel: @Composable () -> Unit = {
+        Panel(Modifier.padding(horizontal = 14.dp).padding(bottom = 14.dp)) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Glyph(ZenIcon.Check, TodoBlue, 26.dp)
+                Column(Modifier.padding(start = 14.dp)) {
+                    Text("All clear for today", color = TodoText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Tap + to add something", color = TodoMuted, fontSize = 13.sp)
+                }
             }
         }
     }
+    val nothing = agenda.empty && !agenda.hasUpcoming
+
+    androidx.compose.animation.Crossfade(Layouts.columns(Layouts.TODAY), animationSpec = androidx.compose.animation.core.tween(260), label = "todayLayout") { columns ->
+    if (!columns || nothing || parts.isEmpty()) LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item(key = "header") { header() }
+        if (nothing) {
+            item(key = "empty") { AllClear(Modifier.fillParentMaxHeight(.55f)) }
+            return@LazyColumn
+        }
+        if (agenda.clear) item(key = "clear") { clearPanel() }
+        parts.forEach { part ->
+            if (part.divider) item(key = "divider-" + part.key) { DayDivider() }
+            item(key = part.key) { part.content() }
+        }
+    } else Column(Modifier.fillMaxSize()) {
+        header()
+        if (agenda.clear) clearPanel()
+        val pager = androidx.compose.foundation.pager.rememberPagerState(pageCount = { parts.size })
+        val scope = rememberCoroutineScope()
+        val chips = androidx.compose.foundation.lazy.rememberLazyListState()
+        LaunchedEffect(pager.currentPage) { runCatching { chips.animateScrollToItem(pager.currentPage) } }
+        androidx.compose.foundation.lazy.LazyRow(
+            state = chips, contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(parts.size, key = { parts[it].key }) { i ->
+                SectionChip(parts[i].chip, selected = pager.currentPage == i) { scope.launch { pager.animateScrollToPage(i, animationSpec = PageSpring) } }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        androidx.compose.foundation.pager.HorizontalPager(
+            pager, Modifier.weight(1f).fillMaxWidth(), flingBehavior = rubberFling(pager), key = { parts.getOrNull(it)?.key ?: it }
+        ) { i ->
+            val part = parts.getOrNull(i) ?: return@HorizontalPager
+            LazyColumn(Modifier.fillMaxSize().bounce(pager, i), contentPadding = PaddingValues(bottom = 24.dp)) {
+                item(key = part.key) { part.content() }
+            }
+        }
+    }
+    }
 }
+
+/** One section of the Today screen: [chip] names it in column mode, [divider] puts a hairline above it in the list. */
+private class TodayPart(val key: String, val chip: String, val divider: Boolean, val content: @Composable () -> Unit)
 
 /** The hairline between today and what comes next. */
 @Composable
@@ -350,19 +384,6 @@ private fun Panel(modifier: Modifier = Modifier, color: Color = TodoCard, conten
     Surface(color = color, shape = shape, border = GlassStroke, modifier = modifier.fillMaxWidth().glassBlur(shape), content = content)
 }
 
-@Composable
-private fun Section(title: String, count: String?, countColor: Color, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.rise().padding(horizontal = 14.dp).padding(bottom = 18.dp)) {
-        Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, color = TodoMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.6.sp)
-            if (count != null) Text(count, color = countColor, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
-        }
-        Panel { Column(content = content) }
-    }
-}
-
-@Composable
-private fun RowDivider() = HorizontalDivider(Modifier.padding(start = 14.dp), color = veil(0.10f))
 
 @Composable
 private fun Pill(label: String, icon: ZenIcon? = null, onClick: () -> Unit) {

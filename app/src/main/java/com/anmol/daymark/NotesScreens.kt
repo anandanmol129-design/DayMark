@@ -27,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,87 +80,28 @@ internal fun NotesPagesScreen(
         }
     }
 
-    val washColor by androidx.compose.animation.animateColorAsState(
-        pages.getOrNull(pagerState.currentPage)?.let(::folderColor) ?: Color.Transparent, androidx.compose.animation.core.tween(350), label = "folderWash"
-    )
-    Column(Modifier.fillMaxSize().folderWashBehind(washColor, .17f)) {
+    // No folder-colour wash: the page takes the tab's own glow from the backdrop, like every other tab.
+    Column(Modifier.fillMaxSize()) {
         androidx.compose.animation.AnimatedVisibility(privateOpen) { PrivateBanner(onLockPrivate) }
-        HorizontalPager(
-            state = pagerState,
-            flingBehavior = rubberFling(pagerState),
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            pageSpacing = 16.dp,
-            key = { index -> pages.getOrNull(index)?.id ?: "empty" }
-        ) { pageIndex ->
-            val page = pages.getOrNull(pageIndex)
-            val folder = page?.let { target -> allColumns.firstOrNull { it.pageId == target.id } }
-            val folderNotes = cards.filter { it.columnId == folder?.id }.sortedByDescending { it.createdAt }
-            val isSaved = page?.id == DEFAULT_SAVED_PAGE_ID
-
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 18.dp, bottom = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    PageTitle(page?.name ?: "Inbox", deletable = page != null && pages.size > 1 && !isSaved && !privateOpen, onDelete = { page?.let(onDeletePage) }, onEdit = if (page != null && !privateOpen) ({ onRenamePage(page) }) else null, modifier = Modifier.weight(1f))
-                    if (isSaved) {
-                        GlassPill(ZenIcon.Picture, "Image", onPickImages)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    NewButton(onNewPage)
-                    SettingsButton()
-                }
-                Text(
-                    (if (privateOpen) "${folderNotes.size} private " else "${folderNotes.size} ") +
-                        if (isSaved) "save${if (folderNotes.size == 1) "" else "s"}" else "note${if (folderNotes.size == 1) "" else "s"}",
-                    color = TodoMuted,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(start = 22.dp, bottom = 4.dp)
-                )
-                if (isSaved && folderNotes.isNotEmpty()) {
-                    SavedGrid(folderNotes, onOpen = onEditCard, onDelete = onDelete, onTogglePrivate = onTogglePrivate, modifier = Modifier.weight(1f).fillMaxWidth())
-                } else if (folderNotes.isEmpty()) {
-                    Column(Modifier.weight(1f).fillMaxWidth().padding(bottom = 40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Glyph(if (privateOpen) ZenIcon.Lock else if (isSaved) ZenIcon.Bookmark else ZenIcon.Note, TodoMuted.copy(alpha = .7f), 44.dp)
-                        Spacer(Modifier.height(12.dp))
-                        Text(if (privateOpen) (if (isSaved) "No private saves" else "No private notes here") else if (isSaved) "Nothing saved yet" else "No notes in this folder", color = TodoMuted, fontSize = 16.sp)
-                        if (privateOpen) Text("Long-press a note or save and choose “Move to Private”", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                        else if (isSaved) Text("Share a link or image to “Add to saves”", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                        folder?.let { TextButton(onClick = { onAddCard(it) }) { Text("Add note", color = TodoBlue) } }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(folderNotes, key = { it.id }) { note ->
-                          Box(Modifier.animateItem()) {
-                            NoteTile(
-                                note = note,
-                                moveTargets = allColumns.filter { it.id != note.columnId },
-                                onMove = { onMoveCard(note, it) },
-                                onDelete = { onDelete(note) },
-                                onOpen = { onEditCard(note) },
-                                onTogglePrivate = { onTogglePrivate(note) }
-                            )
-                          }
-                        }
-                        folder?.let { currentFolder ->
-                            item {
-                                TextButton(onClick = { onAddCard(currentFolder) }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Add note", color = TodoBlue)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        val columnsMode = Layouts.columns(Layouts.NOTES)
+        val pageFor: @Composable (BoardPage?, Modifier) -> Unit = { page, modifier ->
+            NotesFolderPage(page, pages, allColumns, cards, modifier, onNewPage, onDeletePage, onRenamePage, onEditCard, onPickImages, onAddCard, onMoveCard, onDelete, privateOpen, onTogglePrivate)
         }
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            pages.forEachIndexed { index, page ->
-                PagerDot(pagerState.currentPage == index) { scope.launch { pagerState.animateScrollToPage(index, animationSpec = PageSpring) } }
-            }
+        androidx.compose.animation.Crossfade(columnsMode, Modifier.weight(1f).fillMaxWidth(), animationSpec = androidx.compose.animation.core.tween(260), label = "notesLayout") { columnsShown ->
+            if (columnsShown) Column(Modifier.fillMaxSize()) {
+                HorizontalPager(
+                    state = pagerState,
+                    flingBehavior = rubberFling(pagerState),
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    pageSpacing = 16.dp,
+                    key = { index -> pages.getOrNull(index)?.id ?: "empty" }
+                ) { pageIndex -> pageFor(pages.getOrNull(pageIndex), Modifier.fillMaxSize().bounce(pagerState, pageIndex)) }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    pages.forEachIndexed { index, _ ->
+                        PagerDot(pagerState.currentPage == index) { scope.launch { pagerState.animateScrollToPage(index, animationSpec = PageSpring) } }
+                    }
+                }
+            } else NotesListLayout(pages, allColumns, cards, selectedPageId, onSelectPage, onNewPage, onEditCard, onMoveCard, onDelete, onTogglePrivate, privateOpen) { saved, modifier -> pageFor(saved, modifier) }
         }
     }
 }
@@ -264,5 +206,174 @@ private fun noteDate(millis: Long): String {
         date == today.minusDays(1) -> "Yesterday"
         date.year == today.year -> date.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.getDefault()))
         else -> date.format(java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale.getDefault()))
+    }
+}
+
+/** One folder as a page: its title and buttons, a count, then its notes (or the Saved grid). */
+@Composable
+private fun NotesFolderPage(
+    page: BoardPage?,
+    pages: List<BoardPage>,
+    allColumns: List<BoardColumn>,
+    cards: List<BoardCard>,
+    modifier: Modifier,
+    onNewPage: () -> Unit,
+    onDeletePage: (BoardPage) -> Unit,
+    onRenamePage: (BoardPage) -> Unit,
+    onEditCard: (BoardCard) -> Unit,
+    onPickImages: () -> Unit,
+    onAddCard: (BoardColumn) -> Unit,
+    onMoveCard: (BoardCard, BoardColumn) -> Unit,
+    onDelete: (BoardCard) -> Unit,
+    privateOpen: Boolean,
+    onTogglePrivate: (BoardCard) -> Unit
+) {
+    val folder = page?.let { target -> allColumns.firstOrNull { it.pageId == target.id } }
+    val folderNotes = cards.filter { it.columnId == folder?.id }.sortedByDescending { it.createdAt }
+    val isSaved = page?.id == DEFAULT_SAVED_PAGE_ID
+
+    Column(modifier) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 18.dp, bottom = 3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PageTitle(page?.name ?: "Inbox", deletable = page != null && pages.size > 1 && !isSaved && !privateOpen, onDelete = { page?.let(onDeletePage) }, onEdit = if (page != null && !privateOpen) ({ onRenamePage(page) }) else null, modifier = Modifier.weight(1f))
+            if (isSaved) {
+                GlassPill(ZenIcon.Picture, "Image", onPickImages)
+                Spacer(Modifier.width(8.dp))
+            }
+            HeaderIcon(ZenIcon.Folder, "New folder", onClick = onNewPage)
+            LayoutToggle(Layouts.NOTES)
+            SettingsButton()
+        }
+        Text(
+            (if (privateOpen) "${folderNotes.size} private " else "${folderNotes.size} ") +
+                if (isSaved) "save${if (folderNotes.size == 1) "" else "s"}" else "note${if (folderNotes.size == 1) "" else "s"}",
+            color = TodoMuted,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(start = 22.dp, bottom = 4.dp)
+        )
+        if (isSaved && folderNotes.isNotEmpty()) {
+            SavedGrid(folderNotes, onOpen = onEditCard, onDelete = onDelete, onTogglePrivate = onTogglePrivate, modifier = Modifier.weight(1f).fillMaxWidth())
+        } else if (folderNotes.isEmpty()) {
+            Column(Modifier.weight(1f).fillMaxWidth().padding(bottom = 40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Glyph(if (privateOpen) ZenIcon.Lock else if (isSaved) ZenIcon.Bookmark else ZenIcon.Note, TodoMuted.copy(alpha = .7f), 44.dp)
+                Spacer(Modifier.height(12.dp))
+                Text(if (privateOpen) (if (isSaved) "No private saves" else "No private notes here") else if (isSaved) "Nothing saved yet" else "No notes in this folder", color = TodoMuted, fontSize = 16.sp)
+                if (privateOpen) Text("Long-press a note or save and choose “Move to Private”", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                else if (isSaved) Text("Share a link or image to “Add to saves”", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                folder?.let { TextButton(onClick = { onAddCard(it) }) { Text("Add note", color = TodoBlue) } }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(folderNotes, key = { it.id }) { note ->
+                  Box(Modifier.animateItem()) {
+                    NoteTile(
+                        note = note,
+                        moveTargets = allColumns.filter { it.id != note.columnId },
+                        onMove = { onMoveCard(note, it) },
+                        onDelete = { onDelete(note) },
+                        onOpen = { onEditCard(note) },
+                        onTogglePrivate = { onTogglePrivate(note) }
+                    )
+                  }
+                }
+                folder?.let { currentFolder ->
+                    item {
+                        TextButton(onClick = { onAddCard(currentFolder) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Add note", color = TodoBlue)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Notes as one list: every folder's notes one under another, under the folder's name. Saved stays
+ * on its own page to the side, a swipe away.
+ */
+@Composable
+private fun NotesListLayout(
+    pages: List<BoardPage>,
+    allColumns: List<BoardColumn>,
+    cards: List<BoardCard>,
+    selectedPageId: String,
+    onSelectPage: (String) -> Unit,
+    onNewPage: () -> Unit,
+    onEditCard: (BoardCard) -> Unit,
+    onMoveCard: (BoardCard, BoardColumn) -> Unit,
+    onDelete: (BoardCard) -> Unit,
+    onTogglePrivate: (BoardCard) -> Unit,
+    privateOpen: Boolean,
+    savedPage: @Composable (BoardPage, Modifier) -> Unit
+) {
+    val saved = pages.firstOrNull { it.id == DEFAULT_SAVED_PAGE_ID }
+    val folders = pages.filter { it.id != DEFAULT_SAVED_PAGE_ID }
+    val pager = rememberPagerState(initialPage = if (saved != null && selectedPageId == saved.id) 1 else 0, pageCount = { if (saved != null) 2 else 1 })
+    val scope = rememberCoroutineScope()
+    val latestSelected = rememberUpdatedState(selectedPageId)
+    LaunchedEffect(pager) {
+        androidx.compose.runtime.snapshotFlow { pager.currentPage }.drop(1).collect { index ->
+            // New notes go to the folder that was last picked, or the first folder once back from Saved.
+            if (index == 1 && saved != null) onSelectPage(saved.id)
+            else if (latestSelected.value == DEFAULT_SAVED_PAGE_ID) folders.firstOrNull()?.let { onSelectPage(it.id) }
+        }
+    }
+    Column(Modifier.fillMaxSize()) {
+        HorizontalPager(state = pager, flingBehavior = rubberFling(pager), modifier = Modifier.weight(1f).fillMaxWidth(), pageSpacing = 16.dp) { index ->
+            if (index == 1 && saved != null) savedPage(saved, Modifier.fillMaxSize().bounce(pager, index))
+            else Column(Modifier.fillMaxSize().bounce(pager, index)) {
+                val notesByFolder = remember(cards, folders, allColumns) {
+                    folders.map { page ->
+                        val ids = allColumns.filter { it.pageId == page.id }.map { it.id }.toSet()
+                        page to cards.filter { it.columnId in ids }.sortedByDescending { it.createdAt }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 18.dp, bottom = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    PageTitle("Notes", deletable = false, onDelete = {}, modifier = Modifier.weight(1f))
+                    HeaderIcon(ZenIcon.Folder, "New folder", onClick = onNewPage)
+                    LayoutToggle(Layouts.NOTES)
+                    SettingsButton()
+                }
+                val total = notesByFolder.sumOf { it.second.size }
+                Text(
+                    (if (privateOpen) "$total private " else "$total ") + "note${if (total == 1) "" else "s"}",
+                    color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 22.dp, bottom = 4.dp)
+                )
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    notesByFolder.forEach { (page, notes) ->
+                        item(key = "label-" + page.id) { SectionLabel(page.name, notes.size.takeIf { it > 0 }?.toString(), modifier = Modifier.animateItem().padding(top = 8.dp)) }
+                        if (notes.isEmpty()) item(key = "empty-" + page.id) {
+                            Text("No notes yet", color = TodoMuted, fontSize = 14.sp, modifier = Modifier.animateItem().padding(start = 8.dp, bottom = 4.dp))
+                        }
+                        items(notes, key = { it.id }) { note ->
+                            Box(Modifier.animateItem()) {
+                                NoteTile(
+                                    note = note,
+                                    moveTargets = allColumns.filter { it.id != note.columnId },
+                                    onMove = { onMoveCard(note, it) },
+                                    onDelete = { onDelete(note) },
+                                    onOpen = { onEditCard(note) },
+                                    onTogglePrivate = { onTogglePrivate(note) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (saved != null) Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            (0..1).forEach { index -> PagerDot(pager.currentPage == index) { scope.launch { pager.animateScrollToPage(index, animationSpec = PageSpring) } } }
+        }
     }
 }

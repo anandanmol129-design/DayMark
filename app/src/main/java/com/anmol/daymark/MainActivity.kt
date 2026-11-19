@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Look.load(this)
+        Layouts.load(this)
         if (savedInstanceState == null) widgetRequest = WidgetActions.requestFrom(intent)
         setContent {
             // While Private is open, keep it out of screenshots and the recent-apps preview.

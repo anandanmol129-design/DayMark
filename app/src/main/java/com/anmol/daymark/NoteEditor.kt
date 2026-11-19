@@ -1,5 +1,6 @@
 package com.anmol.daymark
 
+import androidx.compose.material3.Surface
 import androidx.compose.ui.semantics.contentDescription
 
 import androidx.compose.ui.semantics.semantics
@@ -230,26 +231,9 @@ internal fun NoteEditorSheet(
                         columns.forEach { column -> DropdownMenuItem(text = { Text(column.name) }, onClick = { columnId = column.id; columnMenu = false }) }
                     }
                 }
-                if (cover.isEmpty() && !reading) {
-                    Row(
-                        Modifier.padding(end = 8.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = ::chooseCover).padding(horizontal = 12.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Glyph(ZenIcon.Picture, TodoMuted, 16.dp, modifier = Modifier.padding(end = 6.dp))
-                        Text("Cover", color = TodoMuted, fontSize = 14.sp)
-                    }
-                }
-                Box(
-                    Modifier.padding(end = 8.dp).size(40.dp).clip(CircleShape).background(if (reading) GlassAccent else Color.Transparent)
-                        .clickable { setReading(!reading) }.semantics { contentDescription = if (reading) "Edit note" else "Reader mode" },
-                    contentAlignment = Alignment.Center
-                ) { Glyph(ZenIcon.Book, if (reading) TodoText else TodoMuted, 20.dp) }
-                Text(
-                    "Done", color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(TodoBlue).clickable(onClick = ::finish).padding(horizontal = 18.dp, vertical = 9.dp)
-                )
             }
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
                 // The cover runs edge to edge across the sheet, with change/remove floating on it.
                 val header = rememberSavedBitmap(cover)
                 if (cover.isNotEmpty()) Box(Modifier.bleed(20.dp).padding(top = 8.dp).fillMaxWidth().height(220.dp).background(TodoCard)) {
@@ -351,7 +335,7 @@ internal fun NoteEditorSheet(
                         }
                     }
                 }
-                if (reading) Spacer(Modifier.height(120.dp))
+                if (reading) Spacer(Modifier.height(200.dp)) // room to scroll the last lines clear of the buttons
                 else {
                     if (isSave) CommentBox(comment, onChange = { comment = it }, onFocused = { currentId = null })
                     // The empty space under the note puts the cursor at the end of the last line.
@@ -361,6 +345,13 @@ internal fun NoteEditorSheet(
                         }
                     )
                 }
+            }
+            // Cover, reader mode and Done float at the bottom right, like search and voice on the main screens.
+            Column(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (cover.isEmpty() && !reading) EditorRoundButton(ZenIcon.Picture, "Add cover", onClick = ::chooseCover)
+                EditorRoundButton(ZenIcon.Book, if (reading) "Edit note" else "Reader mode", active = reading) { setReading(!reading) }
+                EditorRoundButton(ZenIcon.Check, "Done", filled = true, onClick = ::finish)
+            }
             }
             if (attaching) Text("Adding file…", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
             if (reading) ReaderBar(look, ::setLook)
@@ -450,6 +441,17 @@ private fun TextBlock(
                 },
             decorationBox = { field -> Box { if (value.text.isEmpty() && hint != null) Text(hint, style = style.copy(color = TodoMuted.copy(alpha = .55f), textDecoration = null)); field() } }
         )
+    }
+}
+
+/** A round icon button floating over the note: [filled] in the tab's colour (Done), [active] tinted while on (reader mode). */
+@Composable
+private fun EditorRoundButton(icon: ZenIcon, description: String, filled: Boolean = false, active: Boolean = false, onClick: () -> Unit) {
+    Surface(
+        color = if (filled) TodoBlue else if (active) GlassAccent else TodoNav, shape = CircleShape, border = GlassStroke, shadowElevation = 10.dp,
+        modifier = Modifier.size(52.dp).clip(CircleShape).clickable(onClick = onClick).semantics { contentDescription = description }
+    ) {
+        Box(contentAlignment = Alignment.Center) { Glyph(icon, if (filled) OnAccent else TodoText, 22.dp) }
     }
 }
 

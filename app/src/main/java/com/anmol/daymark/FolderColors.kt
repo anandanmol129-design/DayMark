@@ -23,17 +23,3 @@ internal fun newFolderColor(siblings: List<BoardPage>): Int {
     val free = HabitPalette.indices.filter { it !in used }
     return (free.ifEmpty { HabitPalette.indices.toList() }).random()
 }
-
-/** Soft wash from the folder colour at the top fading to nothing. */
-internal fun folderWash(color: Color, alpha: Float = .16f) =
-    Brush.verticalGradient(listOf(color.copy(alpha = alpha), color.copy(alpha = alpha * .35f), Color.Transparent))
-
-/** The folder wash, drawn from the very top of the screen so it also tints the area behind the status bar. */
-@Composable
-internal fun Modifier.folderWashBehind(color: Color, alpha: Float = .16f): Modifier {
-    val top = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
-    return drawBehind {
-        val brush = Brush.verticalGradient(listOf(color.copy(alpha = alpha), color.copy(alpha = alpha * .35f), Color.Transparent), startY = -top, endY = size.height)
-        drawRect(brush, topLeft = Offset(0f, -top), size = Size(size.width, size.height + top))
-    }
-}

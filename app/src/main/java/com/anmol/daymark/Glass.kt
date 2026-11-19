@@ -75,13 +75,13 @@ internal fun GlassBackdrop(content: @Composable () -> Unit) {
             }
         }
     }) {
+        // The tab colour lighting the edges fades across when the tab changes (only the backdrop redraws).
+        val glow by androidx.compose.animation.animateColorAsState(Look.accent.fill, androidx.compose.animation.core.tween(450), label = "edgeGlow")
         if (light) {
-            // Material surfaces sit on a calm cream; a soft pool of the tab's colour glows in from the top.
+            // Material surfaces sit on a calm cream, lit by the tab's colour from beyond the top and bottom edges.
             Canvas(Modifier.fillMaxSize()) {
                 drawRect(TodoBackground)
-                val wash = Look.accent.container
-                val centre = Offset(size.width * .85f, 0f)
-                drawCircle(Brush.radialGradient(listOf(wash, wash.copy(alpha = 0f)), centre, size.width * 1.1f), size.width * 1.1f, centre)
+                drawEdgeGlow(glow, EdgeGlowStrength)
             }
         } else {
             // Record the scene once per frame; glass panels reuse the blurred copy without redrawing.
@@ -96,7 +96,7 @@ internal fun GlassBackdrop(content: @Composable () -> Unit) {
                 }
             ) {
                 val clock = rememberBackdropClock(paused = { SystemClock.uptimeMillis() - lastTouch[0] < 1500 })
-                Canvas(Modifier.fillMaxSize()) { drawBackdrop(clock.value) }
+                Canvas(Modifier.fillMaxSize()) { drawBackdrop(clock.value); drawEdgeGlow(glow, EdgeGlowStrength) }
             }
         }
         // The content stays in one place whichever look is showing, so flipping the theme keeps its state.

@@ -41,6 +41,26 @@ internal fun DrawScope.drawBackdrop(t: Float) {
     drawRect(Color(0x66100F0D))
 }
 
+/**
+ * The current tab's colour glowing in from just beyond the top and bottom edges of the screen, as
+ * if a light of that colour sat out of view at each end: a soft half-circle at the top and bottom.
+ */
+internal fun DrawScope.drawEdgeGlow(color: Color, strength: Float) {
+    val w = size.width
+    val h = size.height
+    fun light(cy: Float, r: Float, alpha: Float) {
+        val c = Offset(w / 2, cy)
+        // Deep at the edge and fading steadily to nothing, rather than a soft halo that lingers.
+        val brush = Brush.radialGradient(0f to color.copy(alpha = alpha), .4f to color.copy(alpha = alpha * .6f), .75f to color.copy(alpha = alpha * .18f), 1f to color.copy(alpha = 0f), center = c, radius = r)
+        drawCircle(brush, r, c)
+    }
+    light(-w * .12f, w * .85f, strength)          // just above the top edge
+    light(h + w * .12f, w * .75f, strength * .85f) // just below the bottom, a little softer behind the bar
+}
+
+/** How strongly [drawEdgeGlow] shows on each theme: the bright tab colours need less on the dark one. */
+internal val EdgeGlowStrength get() = if (Look.light) .5f else .34f
+
 /** A soft pool of light that fades to nothing at its edge. */
 private fun DrawScope.glow(cx: Float, cy: Float, r: Float, color: Color) =
     drawCircle(Brush.radialGradient(listOf(color, color.copy(alpha = color.alpha * .45f), Color.Transparent), Offset(cx, cy), r), r, Offset(cx, cy))

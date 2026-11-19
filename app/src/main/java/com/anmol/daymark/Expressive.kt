@@ -90,10 +90,10 @@ private fun lightScheme(): ColorScheme {
         onBackground = TodoText,
         surface = GlassDialog,
         onSurface = TodoText,
-        surfaceVariant = a.container,
+        surfaceVariant = TodoCardRaised, // neutral: only buttons and icons carry the tab colour
         onSurfaceVariant = TodoMuted,
         surfaceContainer = Color(0xFFFFFBF7),
-        surfaceContainerHigh = Color(0xFFFFF4EC),
+        surfaceContainerHigh = Color(0xFFF6F6F6),
         outline = TodoMuted,
         outlineVariant = Color(0x262A1F1A),
         error = Danger,

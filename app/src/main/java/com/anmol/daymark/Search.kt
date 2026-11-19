@@ -104,14 +104,6 @@ internal fun searchBoard(snapshot: BoardSnapshot, query: String): List<SearchHit
 /** Opens search from any tab's header without threading a callback through every screen. */
 internal val LocalOpenSearch = staticCompositionLocalOf<() -> Unit> { {} }
 
-/** The glass search pill that sits just left of the settings button. */
-@Composable
-internal fun SearchButton() {
-    val open = LocalOpenSearch.current
-    androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
-    IconCircle(ZenIcon.Search, "Search", onClick = open)
-}
-
 /** Full-screen search over the whole app; [onOpen] is told which result was tapped. */
 @Composable
 internal fun SearchScreen(snapshot: BoardSnapshot, onClose: () -> Unit, onOpen: (SearchHit) -> Unit) {
@@ -128,7 +120,7 @@ internal fun SearchScreen(snapshot: BoardSnapshot, onClose: () -> Unit, onOpen: 
         Modifier.fillMaxSize()
             .drawBehind {
                 drawRect(TodoBackground)
-                blurred?.let { drawBlurred(it) }
+                blurred?.let { drawBlurred(it) } ?: drawEdgeGlow(Look.accent.fill, EdgeGlowStrength) // the blurred backdrop already carries it
                 drawRect(PageTint)
             }
             .pointerInput(Unit) { detectTapGestures { } }

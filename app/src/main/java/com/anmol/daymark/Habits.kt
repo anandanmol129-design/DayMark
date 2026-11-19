@@ -142,7 +142,7 @@ internal fun HabitsScreen(
                     when { habits.isEmpty() -> "Small things, every day"; done == habits.size -> "All done today"; else -> "$done of ${habits.size} done today" },
                     color = TodoMuted, fontSize = 15.sp, modifier = Modifier.weight(1f)
                 )
-                if (habits.isNotEmpty()) Row(Modifier.clip(RoundedCornerShape(12.dp)).background(TodoCard).padding(3.dp)) {
+                if (habits.isNotEmpty()) Row {
                     Segment("Month", pager.targetPage == 0) { scope.launch { pager.animateScrollToPage(0, animationSpec = PageSpring) } }
                     Segment("Year", pager.targetPage == 1) { scope.launch { pager.animateScrollToPage(1, animationSpec = PageSpring) } }
                 }
@@ -158,7 +158,7 @@ internal fun HabitsScreen(
             }
         } else HorizontalPager(pager, Modifier.fillMaxSize(), flingBehavior = rubberFling(pager), beyondViewportPageCount = 1, key = { it }) { page ->
             val yearView = page == 1
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
+            LazyColumn(Modifier.fillMaxSize().bounce(pager, page), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
                 items(habits, key = { it.id }) { habit ->
                     Box(Modifier.animateItem().padding(horizontal = 14.dp, vertical = 6.dp)) {
                         HabitCard(habit, today, yearView, onToggleDay = { onToggleDay(habit, it) }, onEdit = { onEdit(habit) }, onDelete = { onDelete(habit) })
@@ -171,11 +171,13 @@ internal fun HabitsScreen(
 
 @Composable
 private fun Segment(label: String, selected: Boolean, onClick: () -> Unit) {
-    val fill by animateColorAsState(if (selected) (if (Look.light) CalendarBlue else veil(0.15f)) else Color.Transparent, tween(200), label = "segment")
-    val corner by animateDpAsState(if (selected && Look.light) 18.dp else 9.dp, spring(dampingRatio = .5f, stiffness = Spring.StiffnessMediumLow), label = "segmentCorner")
+    // Plain labels like the task folders: the selected one brighter, with a line in the tab's colour under it.
+    val text by animateColorAsState(if (selected) TodoText else TodoMuted, tween(200), label = "segment")
+    val underline by androidx.compose.animation.core.animateFloatAsState(if (selected) 1f else 0f, spring(dampingRatio = .7f, stiffness = Spring.StiffnessMediumLow), label = "segmentLine")
     Text(
-        label, color = if (selected) (if (Look.light) OnFill else TodoText) else TodoMuted, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        modifier = Modifier.clip(RoundedCornerShape(corner)).background(fill).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp)
+        label, color = text, fontSize = 15.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp)
+            .tabUnderline(underline, if (Look.light) TodoBlue else Look.accent.fill)
     )
 }
 

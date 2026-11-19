@@ -227,18 +227,36 @@ internal fun DaymarkApp(
         else calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
     }
 
-    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
-        if (!spoken.isNullOrBlank()) {
-            val list = snapshot.columnsFor(snapshot.todoPages.firstOrNull { it.id == selectedTodoPageId } ?: snapshot.todoPages.first()).first()
-            val card = BoardCard(workspace = Workspace.TODOS, columnId = list.id, kind = CardKind.TASK, title = spoken)
-            update(snapshot.copy(cards = listOf(card) + snapshot.cards))
-            workspaceId = Workspace.TODOS.id
-            showMessage("Added to your to-do inbox")
-        }
+    fun addSpokenTask(spoken: String) {
+        val list = snapshot.columnsFor(snapshot.todoPages.firstOrNull { it.id == selectedTodoPageId } ?: snapshot.todoPages.first()).first()
+        val card = BoardCard(workspace = Workspace.TODOS, columnId = list.id, kind = CardKind.TASK, title = spoken)
+        update(snapshot.copy(cards = listOf(card) + snapshot.cards))
+        workspaceId = Workspace.TODOS.id
+        showMessage("Added to your to-do inbox")
     }
 
+    // Listening happens in the app (the voice button shows the sound level); the system popup is
+    // only a fallback for phones without a speech service the app can use directly.
+    val voice = rememberVoiceCapture(onText = { addSpokenTask(it) }, onProblem = { showMessage(it) })
+    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
+        if (!spoken.isNullOrBlank()) addSpokenTask(spoken)
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) voice.start() else showMessage("Allow the microphone to add tasks by voice")
+    }
+
+    val tabHaptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    /** Shows a tab: Today (null) or one of the workspaces, in bottom-bar order. */
+    fun selectTab(tab: Workspace?) { if (tab == null) todayActive = true else { todayActive = false; workspaceId = tab.id } }
+
     fun startVoiceCapture() {
+        if (voice.listening) { voice.stop(); return } // a second tap finishes
+        if (voice.available) {
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) voice.start()
+            else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
@@ -458,10 +476,15 @@ internal fun DaymarkApp(
         contentWindowInsets = WindowInsets.statusBars,
         snackbarHost = { SnackbarHost(snackbar) },
         // Lines up over the + at the end of the bottom bar (both sit about 44dp in from the edge).
-        floatingActionButton = { Box(Modifier.graphicsLayer { alpha = appear.value }.padding(end = 2.dp)) { FloatingSearchButton() } },
+        floatingActionButton = { Box(Modifier.graphicsLayer { alpha = appear.value }.padding(end = 2.dp)) {
+            androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                FloatingSearchButton()
+                FloatingVoiceButton(voice.listening, voice.level, ::startVoiceCapture)
+            }
+        } },
         bottomBar = {
           Box(Modifier.graphicsLayer { translationY = (1f - appear.value) * 90.dp.toPx() }) {
-            WorkspaceNavigation(selected = if (todayActive) null else workspace, darkTheme = true, calendarTheme = false, privateOpen = privateOpen, onLongPressNotes = ::togglePrivate, onSelect = { if (it == null) todayActive = true else { todayActive = false; workspaceId = it.id } }, onCreate = {
+            WorkspaceNavigation(selected = if (todayActive) null else workspace, darkTheme = true, calendarTheme = false, privateOpen = privateOpen, onLongPressNotes = ::togglePrivate, onSelect = ::selectTab, onCreate = {
                 if (todayActive) {
                     // A new task due today, in the default to-do page's first list.
                     val page = snapshot.todoPages.firstOrNull { it.id == DEFAULT_TODO_PAGE_ID } ?: snapshot.todoPages.first()
@@ -483,16 +506,27 @@ internal fun DaymarkApp(
         }
     ) { insets ->
         Column(Modifier.fillMaxSize().padding(insets)) {
-          // Switching tabs flips the screen like a card, turning toward the tab you picked.
+          // Switching tabs swings the screens round a carousel, toward the tab you picked.
           val tab = if (todayActive) null else workspace
           val lastTab = remember { intArrayOf(tab?.ordinal ?: -1) }
-          val flipForward = remember(tab) { ((tab?.ordinal ?: -1) > lastTab[0]).also { lastTab[0] = tab?.ordinal ?: -1 } }
+          val swingForward = remember(tab) { ((tab?.ordinal ?: -1) > lastTab[0]).also { lastTab[0] = tab?.ordinal ?: -1 } }
+          // Read the tab when the swipe lands, not when a screen first set up its gesture handler.
+          val currentTab = androidx.compose.runtime.rememberUpdatedState(tab)
+          val swipeTab: (Boolean) -> Unit = remember {
+              { forward ->
+                  val order = listOf<Workspace?>(null, Workspace.TODOS, Workspace.CALENDAR, Workspace.NOTES, Workspace.TRACK)
+                  val next = order.indexOf(currentTab.value) + if (forward) 1 else -1
+                  if (next in order.indices) { tabHaptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentTick); selectTab(order[next]) }
+              }
+          }
+          androidx.compose.runtime.CompositionLocalProvider(LocalTabSwipe provides swipeTab) {
           AnimatedContent(
             targetState = tab,
+            modifier = Modifier.swipeBetweenTabs(swipeTab),
             transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
             label = "workspace"
           ) { shown ->
-           Box(flip(flipForward)) {
+           Box(carousel(swingForward)) {
             if (shown == null) TodayScreen(
                 snapshot = snapshot,
                 timerTick = timerTick,
@@ -583,6 +617,7 @@ internal fun DaymarkApp(
             )
             }
            }
+          }
           }
         }
     }

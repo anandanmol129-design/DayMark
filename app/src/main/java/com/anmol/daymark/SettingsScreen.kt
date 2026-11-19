@@ -85,7 +85,7 @@ internal fun SettingsScreen(
             // Paint the blurred background so nothing from the tab underneath shows through.
             .drawBehind {
                 drawRect(TodoBackground)
-                blurred?.let { drawBlurred(it) }
+                blurred?.let { drawBlurred(it) } ?: drawEdgeGlow(Look.accent.fill, EdgeGlowStrength) // the blurred backdrop already carries it
                 drawRect(PageTint)
             }
             // Swallow taps so they don't reach the tab underneath.
