@@ -90,7 +90,9 @@ data class BoardCard(
     /** A habit that happens at a set time (an event) rather than something to tick off (a task). */
     val habitEvent: Boolean = false,
     /** The phone calendar event this card was copied to by [CalendarSync] (Daymark's own events and timed to-dos); null if none. */
-    val providerEventId: Long? = null
+    val providerEventId: Long? = null,
+    /** A Focus tracker's (TIMER card's) finished sessions, oldest first. See Focus.kt. */
+    val sessions: List<FocusSession> = emptyList()
 )
 
 data class BoardSnapshot(
@@ -230,6 +232,7 @@ private fun BoardCard.toJson() = JSONObject().apply {
     put("remind", remind); put("remindLeadMinutes", remindLeadMinutes)
     put("habitColor", habitColor); put("habitEvent", habitEvent)
     put("providerEventId", providerEventId ?: JSONObject.NULL)
+    if (sessions.isNotEmpty()) put("sessions", JSONArray().apply { sessions.forEach { put(it.toJson()) } })
 }
 
 private fun JSONArray.toColumns() = (0 until length()).map { i ->
@@ -390,6 +393,7 @@ private fun JSONArray.toCards() = (0 until length()).map { i ->
         remindLeadMinutes = item.optInt("remindLeadMinutes").coerceIn(0, 7 * 24 * 60),
         habitColor = item.optInt("habitColor", -1).coerceIn(-1, HabitPalette.size - 1),
         habitEvent = item.optBoolean("habitEvent"),
-        providerEventId = if (item.isNull("providerEventId")) null else item.optLong("providerEventId").takeIf { it > 0 }
+        providerEventId = if (item.isNull("providerEventId")) null else item.optLong("providerEventId").takeIf { it > 0 },
+        sessions = item.optJSONArray("sessions").toSessions()
     )
 }

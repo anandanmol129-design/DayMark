@@ -5,7 +5,7 @@
 <h1 align="center">Daymark</h1>
 
 <p align="center">
-  A calm, private planner for Android: to-dos, calendar, notes and habits in one place.<br>
+  A calm, private planner for Android: to-dos, calendar, notes, habits and a focus timer in one place.<br>
   Everything stays on your phone.
 </p>
 
@@ -37,7 +37,16 @@ The cover, reader and Done buttons sit at the bottom right, above the formatting
 
 **Private** keeps chosen notes and saves behind your fingerprint, face or screen lock. Hold the Notes tab to open it. Private items never appear in search or widgets, and screenshots are blocked while it's open.
 
-**Habits** track the small things you do every day:
+**Focus** is a pomodoro timer and time tracker, and the first page of the Habits tab:
+- Add what you spend time on (Deep work, Study, Workout…) with +. Each one is a card: its name, a timer wheel and a start pill.
+- Turn the **wheel** to set the length (1 minute to 3 hours). It ticks under your finger and clicks softly for every minute.
+- **Hold the start pill** for five seconds. It fills with the timer's colour, and the timer grows out of it to fill the screen.
+- Full screen shows the countdown, pause, +5 min and when it ends, with a dock for Phone, Messages, Camera and three apps of your own. Write notes during the session, or after it ends.
+- **Lock in** for deep focus: while the session runs, every other app is covered until the timer ends. Calls and the dock's apps still get through, and you can hold to end it early.
+- Each finished session is kept with its notes and, with usage access, which apps you opened during it. Tap a card to fan its history out beneath it; tap again to stack it back up.
+- An optional **always-on display** (Settings › Focus) keeps the timer on screen, dimmed to outlines when left alone.
+
+**Habits** sit a swipe to the right of Focus, and track the small things you do every day:
 - Add a habit as a **task** (tick it off whenever) or an **event** (a set time and duration, shown on your calendar).
 - Give it one of eight colours and an optional reminder.
 - See your streak, your best run, and a month or a whole year of coloured squares. Tap any past day to fill it in.
@@ -91,6 +100,8 @@ Daymark has no account, no analytics and no ads. Your data is stored in the app'
 
 The app uses the internet for one thing only: fetching the title and preview image of a link you save. It asks for calendar access only when you choose calendars to show or turn on sync. It asks for the microphone the first time you add a task by voice; what you say is turned into text by your phone's own speech service (usually Google's), as with any voice typing.
 
+Focus asks for two more permissions only when you first turn on Lock in: **display over other apps**, to cover other apps during a deep focus session, and **usage access**, to let calls and your dock apps through and to note which apps you opened during a session. That list is stored with the session on your phone, like everything else.
+
 ## Install
 
 1. On your phone, open the [latest release](../../releases/latest) and download the `.apk` file.
@@ -117,6 +128,7 @@ The app is written in Kotlin with Jetpack Compose. The sources are in `app/src/m
 | Data model and storage | `BoardModels.kt`, `Backup.kt`, `AutoBackup.kt`, `Attachments.kt` |
 | Voice input | `Voice.kt` |
 | Screens | `Today.kt`, `TodoScreens.kt`, `CalendarScreen.kt`, `NotesScreens.kt`, `NoteEditor.kt`, `SavedGrid.kt`, `Habits.kt`, `SettingsScreen.kt`, `StorageScreen.kt`, `Search.kt` |
+| Focus timer | `Focus.kt` (page, sessions, full screen), `FocusWheel.kt` (timer wheel, app dock), `DeepFocus.kt` (Lock in cover, app usage) |
 | Reminders and alarms | `Reminders.kt`, `AlarmRinging.kt`, `ReminderSettings.kt` |
 | Calendar sync | `CalendarSync.kt`, `CalendarSettings.kt` |
 | Widgets | `TaskListWidget.kt`, `TaskCompactWidget.kt`, `MonthWidget.kt`, `CalendarWidget.kt`, `NoteWidget.kt`, `HabitWidgets.kt`, `WidgetLook.kt`, `WidgetSetup.kt` |

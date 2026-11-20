@@ -112,7 +112,7 @@ internal fun FollowAccent(workspace: Workspace?, private: Boolean) {
 
 /** A [Morph] drawn at a fixed [progress], scaled from the unit square to whatever it clips. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-private class MorphShape(private val morph: Morph, private val progress: Float) : Shape {
+internal class MorphShape(private val morph: Morph, private val progress: Float) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
         val path = morph.toPath(progress, Path())
         path.transform(Matrix().apply { scale(size.width, size.height) })

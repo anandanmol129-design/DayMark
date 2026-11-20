@@ -49,10 +49,12 @@ object WidgetActions {
     const val CARD_EDIT = "com.anmol.daymark.widget.CARD_EDIT"
     /** Opens the Habits tab (target = a habit id to edit, or ""). */
     const val HABITS_OPEN = "com.anmol.daymark.widget.HABITS_OPEN"
+    /** Opens the Focus page beside Habits (from the focus timer's notifications). */
+    const val FOCUS_OPEN = "com.anmol.daymark.focus.OPEN"
     private const val EXTRA_TARGET = "folder"
     private const val EXTRA_DAY = "day"
     private const val PREFS = "daymark_settings"
-    private val appActions = setOf(TASKS_OPEN, TASKS_ADD, CALENDAR_OPEN, CALENDAR_ADD, NOTE_OPEN, CARD_EDIT, HABITS_OPEN)
+    private val appActions = setOf(TASKS_OPEN, TASKS_ADD, CALENDAR_OPEN, CALENDAR_ADD, NOTE_OPEN, CARD_EDIT, HABITS_OPEN, FOCUS_OPEN)
 
     fun requestFrom(intent: Intent?): WidgetRequest? {
         val action = intent?.action?.takeIf { it in appActions } ?: return null

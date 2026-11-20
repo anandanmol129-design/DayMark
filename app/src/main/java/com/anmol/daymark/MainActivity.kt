@@ -31,8 +31,16 @@ class MainActivity : ComponentActivity() {
         resumeTick++
     }
 
+    override fun onStart() {
+        super.onStart()
+        DeepFocus.appVisible = true
+        DeepFocus.poke()
+    }
+
     override fun onStop() {
         super.onStop()
+        DeepFocus.appVisible = false
+        DeepFocus.poke()
         PrivateVault.onAppHidden()
     }
 

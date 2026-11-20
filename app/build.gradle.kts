@@ -13,8 +13,8 @@ android {
         applicationId = "com.anmol.daymark"
         minSdk = 31
         targetSdk = 35
-        versionCode = 30
-        versionName = "1.22.0"
+        versionCode = 31
+        versionName = "1.23.0"
     }
 
     buildTypes {

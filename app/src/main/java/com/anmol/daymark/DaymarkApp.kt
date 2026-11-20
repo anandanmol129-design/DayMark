@@ -113,6 +113,7 @@ internal fun DaymarkApp(
     var selectedColumnByWorkspace by remember { mutableStateOf(emptyMap<String, String>()) }
     var selectedTodoPageId by rememberSaveable { mutableStateOf(DEFAULT_TODO_PAGE_ID) }
     var selectedNotesPageId by rememberSaveable { mutableStateOf(DEFAULT_NOTES_PAGE_ID) }
+    var trackPage by rememberSaveable { mutableStateOf(0) } // 0 is Focus (the tab opens on it), 1 is Habits
     var pendingAppChoice by remember { mutableStateOf<AppChoice?>(null) }
     var snackbarMessage by remember { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
@@ -211,6 +212,66 @@ internal fun DaymarkApp(
         showMessage(if (existing) "Habit updated" else "Habit added")
     }
 
+    // Focus (Focus.kt): the things you time, the running session, and what happens when it ends.
+    val trackers = remember(snapshot.cards) { snapshot.cards.filter { it.kind == CardKind.TIMER }.sortedBy { it.createdAt } }
+    remember { FocusClock.load(context) }
+    // A deep session that outlived the app (an update, or the process being killed) gets its cover back.
+    LaunchedEffect(Unit) { FocusClock.run?.let { DeepFocus.sync(context, it); FocusClock.refreshNotification(context) } }
+    val focusNotificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    fun newTracker(): BoardCard {
+        val column = snapshot.columnsFor(Workspace.TRACK).let { cols -> cols.firstOrNull { it.name.equals("Timers", true) } ?: cols.lastOrNull() }
+        val used = trackers.map(::habitColorIndex).toSet()
+        val color = HabitPalette.indices.firstOrNull { it !in used } ?: (trackers.size % HabitPalette.size)
+        return BoardCard(workspace = Workspace.TRACK, columnId = column?.id ?: "timers", kind = CardKind.TIMER, title = "", habitColor = color, durationMinutes = FOCUS_DEFAULT_MINUTES)
+    }
+    fun saveTracker(card: BoardCard) {
+        var next = snapshot
+        if (next.columns.none { it.id == card.columnId }) next = next.copy(columns = next.columns + BoardColumn(id = card.columnId, workspace = Workspace.TRACK, name = "Timers"))
+        val existing = next.cards.any { it.id == card.id }
+        update(next.copy(cards = if (existing) next.cards.map { if (it.id == card.id) card else it } else next.cards + card))
+        FocusUi.editor = null
+        showMessage(if (existing) "Timer updated" else "Timer added")
+    }
+    fun deleteTracker(card: BoardCard) {
+        FocusUi.editor = null
+        if (FocusClock.run?.trackerId == card.id) FocusClock.finish(context, completed = false)
+        deleteWithUndo("Timer deleted", setOf(card.id))
+    }
+    fun startFocus(card: BoardCard, minutes: Int) {
+        if (FocusClock.run != null) { showMessage("A session is already running"); return }
+        if (Reminders.needsNotificationPermission(context)) focusNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val deep = card.id in FocusClock.deepTrackers
+        if (deep && !DeepFocus.canOverlay(context)) { FocusUi.deepSetup = card.id; return }
+        FocusClock.start(context, card, minutes, deep)
+        FocusUi.fullScreen = true
+    }
+    /** Ends the running session: records it on its tracker and opens its notes. */
+    fun finishFocus(completed: Boolean) {
+        val (run, session) = FocusClock.finish(context, completed) ?: return
+        if (session == null) { showMessage(if (completed) "Break’s over" else "Break skipped"); return }
+        if (snapshot.cards.none { it.id == run.trackerId }) return
+        if (session.focusedMillis < 60_000 && session.note.isBlank()) { showMessage("Under a minute, so not saved"); return }
+        update(snapshot.withSession(run.trackerId, session))
+        FocusUi.justEnded = true
+        FocusUi.sheet = run.trackerId to session.id
+        FocusUi.fullScreen = false
+    }
+    val focusHaptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val focusRun = FocusClock.run
+    LaunchedEffect(focusRun) {
+        while (focusRun != null) {
+            androidx.compose.runtime.withFrameMillis { }
+            val now = System.currentTimeMillis()
+            FocusClock.now = now
+            if (!focusRun.paused && focusRun.remaining(now) <= 0L) {
+                focusHaptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                finishFocus(completed = true)
+                break
+            }
+            delay(100)
+        }
+    }
+
     // Two-way calendar sync (CalendarSync.kt): apply the card changes a sync works out to what's on screen.
     val calendarPatches by CalendarSync.patchTick.collectAsState()
     LaunchedEffect(calendarPatches) { CalendarSync.drainPatches(context) { patch -> patch.apply(snapshot).let { if (it !== snapshot) update(it) } } }
@@ -248,7 +309,11 @@ internal fun DaymarkApp(
 
     val tabHaptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     /** Shows a tab: Today (null) or one of the workspaces, in bottom-bar order. */
-    fun selectTab(tab: Workspace?) { if (tab == null) todayActive = true else { todayActive = false; workspaceId = tab.id } }
+    fun selectTab(tab: Workspace?) {
+        // Coming to the Habits tab from another tab always lands on Focus.
+        if (tab == Workspace.TRACK && (todayActive || workspaceId != tab.id)) trackPage = 0
+        if (tab == null) todayActive = true else { todayActive = false; workspaceId = tab.id }
+    }
 
     fun startVoiceCapture() {
         if (voice.listening) { voice.stop(); return } // a second tap finishes
@@ -440,7 +505,12 @@ internal fun DaymarkApp(
             }
             WidgetActions.HABITS_OPEN -> {
                 workspaceId = Workspace.TRACK.id
+                trackPage = 1
                 latest.cards.firstOrNull { it.id == request.target && it.kind == CardKind.HABIT }?.let { editingCardId = it.id; draftColumnId = it.columnId; showComposer = true }
+            }
+            WidgetActions.FOCUS_OPEN -> {
+                workspaceId = Workspace.TRACK.id
+                trackPage = 0
             }
             WidgetActions.NOTE_OPEN -> {
                 val note = latest.cards.firstOrNull { it.id == request.target }
@@ -499,7 +569,8 @@ internal fun DaymarkApp(
                     val page = snapshot.notesPages.firstOrNull { it.id == selectedNotesPageId } ?: snapshot.notesPages.first()
                     draftColumnId = snapshot.columnsFor(page, Workspace.NOTES).first().id
                     showComposer = true
-                } else if (workspace == Workspace.TRACK) { editingCardId = null; showComposer = true }
+                } else if (workspace == Workspace.TRACK && trackPage == 0) FocusUi.editor = ""
+                else if (workspace == Workspace.TRACK) { editingCardId = null; showComposer = true }
                 else { draftColumnId = columns.firstOrNull()?.id.orEmpty(); showComposer = true }
             })
           }
@@ -559,7 +630,14 @@ internal fun DaymarkApp(
                 onToggleDay = ::toggleHabitDay,
                 onEdit = { card -> editingCardId = card.id; draftColumnId = card.columnId; showComposer = true },
                 onDelete = { card -> deleteWithUndo(deletedMessage(card, snapshot), setOf(card.id)) },
-                onAdd = { editingCardId = null; showComposer = true }
+                onAdd = { editingCardId = null; showComposer = true },
+                trackers = trackers,
+                page = trackPage,
+                onPageChange = { trackPage = it },
+                onStartFocus = ::startFocus,
+                onSetFocusMinutes = { card, minutes -> update(snapshot.copy(cards = snapshot.cards.map { if (it.id == card.id) it.copy(durationMinutes = minutes) else it })) },
+                onStopFocus = { finishFocus(completed = false) },
+                onDeleteTracker = ::deleteTracker
             ) else { val workspace = shown
             BoardScreen(
                 workspace = workspace,
@@ -680,6 +758,26 @@ internal fun DaymarkApp(
         exit = fadeOut(tween(160))
     ) {
         SearchScreen(snapshot = snapshot, onClose = { showSearch = false }, onOpen = ::openSearchHit)
+    }
+
+    FocusFullScreen(onStop = { finishFocus(completed = false) })
+    FocusUi.deepSetup?.let { id -> DeepFocusSetup(id) { FocusUi.deepSetup = null } }
+    FocusUi.editor?.let { id ->
+        val editing = trackers.firstOrNull { it.id == id }
+        val starter = remember(id) { newTracker() }
+        TrackerEditor(editing, starter, onDismiss = { FocusUi.editor = null }, onSave = ::saveTracker, onDelete = ::deleteTracker)
+    }
+    FocusUi.sheet?.let { (trackerId, sessionId) ->
+        val tracker = trackers.firstOrNull { it.id == trackerId }
+        val session = tracker?.sessions?.firstOrNull { it.id == sessionId }
+        if (tracker == null || session == null) { LaunchedEffect(Unit) { FocusUi.sheet = null }; return@let }
+        SessionSheet(
+            tracker, session, FocusUi.justEnded,
+            onSaveNote = { note -> update(snapshot.editSession(trackerId, sessionId, note)) },
+            onDelete = { FocusUi.sheet = null; update(snapshot.withoutSession(trackerId, sessionId)); showMessage("Session deleted") },
+            onBreak = { FocusUi.sheet = null; FocusClock.startBreak(context, null) },
+            onClose = { FocusUi.sheet = null }
+        )
     }
 
     viewingSave?.let { SavedImageViewer(it) { viewingSave = null } }

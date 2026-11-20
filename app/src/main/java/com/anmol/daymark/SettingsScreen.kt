@@ -138,6 +138,18 @@ internal fun SettingsScreen(
             }
             item { RemindersSettings(snackbar) }
             item {
+                SettingsSection("Focus") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(36.dp)) { Glyph(ZenIcon.Timer, TodoBlue, 20.dp) }
+                        Column(Modifier.weight(1f).padding(end = 10.dp)) {
+                            Text("Always-on display", color = TodoText, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Text("Keep the full-screen timer on, dimmed to an outline when left alone", color = TodoMuted, fontSize = 12.sp)
+                        }
+                        PillChoice(listOf(false to "Off", true to "On"), FocusClock.aod) { FocusClock.setAod(context, it) }
+                    }
+                }
+            }
+            item {
                 SettingsSection("Your data") {
                     SettingsStat("To-dos", "$tasks across ${snapshot.todoPages.size} page${if (snapshot.todoPages.size == 1) "" else "s"}")
                     SettingsStat("Notes & saves", "$notes in ${snapshot.notesPages.size} folder${if (snapshot.notesPages.size == 1) "" else "s"}")

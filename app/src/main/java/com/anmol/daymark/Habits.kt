@@ -114,14 +114,50 @@ internal fun habitSummary(card: BoardCard): String = listOfNotNull(
 /** Check-ins on or after the first of [month], up to its end. */
 internal fun checkInsIn(checkIns: Collection<Long>, from: Long, to: Long) = checkIns.count { it in from..to }
 
-/** The habit tracker tab: each habit with its streak, today's check and a month or year of coloured squares. */
+/**
+ * The Habits tab: Focus (pomodoro timers and time tracking) on the first page, where it opens, and
+ * habits a swipe away on the second.
+ */
 @Composable
 internal fun HabitsScreen(
     habits: List<BoardCard>,
     onToggleDay: (BoardCard, Long) -> Unit,
     onEdit: (BoardCard) -> Unit,
     onDelete: (BoardCard) -> Unit,
-    onAdd: () -> Unit
+    onAdd: () -> Unit,
+    trackers: List<BoardCard>,
+    page: Int,
+    onPageChange: (Int) -> Unit,
+    onStartFocus: (BoardCard, Int) -> Unit,
+    onSetFocusMinutes: (BoardCard, Int) -> Unit,
+    onStopFocus: () -> Unit,
+    onDeleteTracker: (BoardCard) -> Unit
+) {
+    val pager = rememberPagerState(initialPage = page.coerceIn(0, 1)) { 2 }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(pager.currentPage) { onPageChange(pager.currentPage) }
+    // A notification tap asks for the Focus page while the tab is already open.
+    LaunchedEffect(page) { if (page != pager.currentPage && !pager.isScrollInProgress) pager.animateScrollToPage(page.coerceIn(0, 1), animationSpec = PageSpring) }
+    Column(Modifier.fillMaxSize()) {
+        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), flingBehavior = rubberFling(pager), pageSpacing = 16.dp, beyondViewportPageCount = 1) { index ->
+            if (index == 0) FocusPage(trackers, onStartFocus, onSetFocusMinutes, onStopFocus, onDeleteTracker, Modifier.fillMaxSize().bounce(pager, index))
+            else HabitsPage(habits, onToggleDay, onEdit, onDelete, onAdd, Modifier.fillMaxSize().bounce(pager, index))
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            (0..1).forEach { index -> PagerDot(pager.currentPage == index) { scope.launch { pager.animateScrollToPage(index, animationSpec = PageSpring) } } }
+        }
+    }
+}
+
+/** Each habit with its streak, today's check and a month or year of coloured squares. */
+@Composable
+private fun HabitsPage(
+    habits: List<BoardCard>,
+    onToggleDay: (BoardCard, Long) -> Unit,
+    onEdit: (BoardCard) -> Unit,
+    onDelete: (BoardCard) -> Unit,
+    onAdd: () -> Unit,
+    modifier: Modifier
 ) {
     val today = LocalDate.now().toEpochDay()
     // Month and year are two pages side by side: swipe between them, or tap the toggle.
@@ -130,7 +166,7 @@ internal fun HabitsScreen(
     val scope = rememberCoroutineScope()
     LaunchedEffect(pager.currentPage) { savedPage = pager.currentPage }
     val done = habits.count { it.checkedOn(today) }
-    Column(Modifier.fillMaxSize()) {
+    Column(modifier) {
         Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp, bottom = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(todayLabel(), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
