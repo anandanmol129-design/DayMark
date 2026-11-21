@@ -462,6 +462,6 @@ class ReminderSystemReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         // Exact alarms just became allowed (or were taken away again): re-set everything, now exact. Nothing was "missed" by that.
         if (action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED && !Reminders.exactAllowed(app)) return
-        with(Reminders) { inBackground { reschedule(app, deliverMissed = action == Intent.ACTION_BOOT_COMPLETED) } }
+        with(Reminders) { inBackground { reschedule(app, deliverMissed = action == Intent.ACTION_BOOT_COMPLETED); runCatching { PinnedNotes.sync(app, BoardStore(app).load(), force = true) } } }
     }
 }

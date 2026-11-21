@@ -27,11 +27,22 @@
 
 **To-dos** live in folders (Inbox, Work, Home…). Add them by typing or by voice (tap the mic and speak; four small bars move with your voice while it listens), star the important ones, give them a date and time, and let them repeat daily, on weekdays, weekly, monthly or yearly.
 
-**Calendar** shows a week strip and a timeline of the day, with tasks, events and habits together. Swipe through the days of the week, and pick which of your phone's calendars to show. Sync is two-way through Android's own calendar storage: events you make in Daymark (and, if you like, timed to-dos) are copied to one calendar you choose, such as your Google calendar, and edits go both ways. No Google sign-in is needed.
+Hold a to-do to lift it off the list. Drop it between others to reorder (a dotted gap opens where it will land, and it snaps in), on a folder name to move it, or on the trash that appears above the bottom bar. Hold it near the left or right edge to carry it into the next folder. Notes and habits move the same way.
 
-**Notes** are written as pages: headings, checklists, bullets, quotes, tables, images and drawings, with an optional cover image. Crop a picture before you add it, or use it as it is. Attach any other file too, such as a PDF, a voice recording, a video or a document; tap it to open it in another app. Notes can be kept in colour-coded folders.
+**Calendar** shows a week strip and a timeline of the day, with tasks, events and habits together:
+- Under each date, one dot per event in its colour, arranged as a little shape (a pair, a triangle, a square…).
+- Swipe the week strip to change week. Jump to any date with three spinning gears for day, month and year.
+- Times sit above each card and the length under its name, with a wavy line in the event's colour beside it.
+- Tap an event to edit it; + adds one on the day you're looking at, with start and end times set on gears.
+- Deleting takes two taps on the trash: the first opens its lid.
 
-The cover, reader and Done buttons sit at the bottom right, above the formatting bar. Tap the book to read a note in **reader mode**: the keyboard stays away while you scroll, checkboxes and links still work, and a bar at the bottom sets the font (Sans, Serif or Mono) and text size.
+Pick which of your phone's calendars to show. Sync is two-way through Android's own calendar storage: events you make in Daymark (and, if you like, timed to-dos) are copied to one calendar you choose, such as your Google calendar, and edits go both ways. No Google sign-in is needed.
+
+**Notes** are written as pages: headings, checklists, bullets, quotes, tables, images and drawings, with an optional cover image. The formatting bar keeps headings, lists and attachments each under one button that pops out its choices, and has undo and redo. Selection runs across lines and list items, so Select all takes the whole note. Crop a picture before you add it, or use it as it is. Attach any other file too, such as a PDF, a voice recording, a video or a document; tap it to open it in another app. Notes can be kept in colour-coded folders.
+
+Share a note from its share button, or by dragging it onto Share: copy it as text, send it as one long picture, or as a zip with its files. Pin a note to your notifications to keep it in view.
+
+The share, cover, pin, reader and Done buttons sit at the bottom right, above the formatting bar. Tap the book to read a note in **reader mode**: the keyboard stays away while you scroll, checkboxes and links still work, and a bar at the bottom sets the font (Sans, Serif or Mono) and text size.
 
 **Saved** collects links, text and images shared from other apps through the Android share sheet. Links get their title and preview image, and you can add a comment of your own to anything you save.
 
@@ -48,7 +59,7 @@ The cover, reader and Done buttons sit at the bottom right, above the formatting
 
 **Habits** sit a swipe to the right of Focus, and track the small things you do every day:
 - Add a habit as a **task** (tick it off whenever) or an **event** (a set time and duration, shown on your calendar).
-- Give it one of eight colours and an optional reminder.
+- Give it one of eight colours and an optional reminder. Hold one to reorder it.
 - See your streak, your best run, and a month or a whole year of coloured squares. Tap any past day to fill it in.
 
 <p align="center">
@@ -98,7 +109,7 @@ Daymark starts in a calm dark look. Switch to **Light** in Settings › Appearan
 
 Daymark has no account, no analytics and no ads. Your data is stored in the app's private storage on your phone and nowhere else.
 
-The app uses the internet for one thing only: fetching the title and preview image of a link you save. It asks for calendar access only when you choose calendars to show or turn on sync. It asks for the microphone the first time you add a task by voice; what you say is turned into text by your phone's own speech service (usually Google's), as with any voice typing.
+The app uses the internet for one thing only: fetching the title and preview image of a link you save. It asks for calendar access only when you choose calendars to show or turn on sync. Pinned notes are shown in your notifications only if you allow them, and private notes can't be pinned. Taking a photo for a note uses your camera app; Daymark itself has no camera permission. It asks for the microphone the first time you add a task by voice; what you say is turned into text by your phone's own speech service (usually Google's), as with any voice typing.
 
 Focus asks for two more permissions only when you first turn on Lock in: **display over other apps**, to cover other apps during a deep focus session, and **usage access**, to let calls and your dock apps through and to note which apps you opened during a session. That list is stored with the session on your phone, like everything else.
 
@@ -127,7 +138,9 @@ The app is written in Kotlin with Jetpack Compose. The sources are in `app/src/m
 | App state and navigation | `DaymarkApp.kt`, `Navigation.kt`, `NavIcons.kt`, `Layouts.kt` |
 | Data model and storage | `BoardModels.kt`, `Backup.kt`, `AutoBackup.kt`, `Attachments.kt` |
 | Voice input | `Voice.kt` |
-| Screens | `Today.kt`, `TodoScreens.kt`, `CalendarScreen.kt`, `NotesScreens.kt`, `NoteEditor.kt`, `SavedGrid.kt`, `Habits.kt`, `SettingsScreen.kt`, `StorageScreen.kt`, `Search.kt` |
+| Screens | `Today.kt`, `TodoScreens.kt`, `CalendarScreen.kt`, `NotesScreens.kt`, `SavedGrid.kt`, `Habits.kt`, `SettingsScreen.kt`, `StorageScreen.kt`, `Search.kt` |
+| Note editor | `NoteEditor.kt`, `NoteRuns.kt`, `NoteTextRun.kt` (text fields that span lines), `NoteToolbar.kt`, `Markdown.kt`, `NoteShare.kt`, `PinnedNotes.kt` |
+| Drag and drop, pickers | `TaskDrag.kt`, `TrashLid.kt`, `Gears.kt` |
 | Focus timer | `Focus.kt` (page, sessions, full screen), `FocusWheel.kt` (timer wheel, app dock), `DeepFocus.kt` (Lock in cover, app usage) |
 | Reminders and alarms | `Reminders.kt`, `AlarmRinging.kt`, `ReminderSettings.kt` |
 | Calendar sync | `CalendarSync.kt`, `CalendarSettings.kt` |

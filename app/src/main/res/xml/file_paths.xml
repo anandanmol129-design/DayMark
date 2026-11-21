@@ -4,4 +4,8 @@
     <!-- Lets a file attached to a note open in another app, one file at a time. -->
     <files-path name="attachments" path="saves/" />
     <cache-path name="open" path="open/" />
+    <!-- A note shared as a picture or a zip. -->
+    <cache-path name="share" path="share/" />
+    <!-- A photo taken from the note editor, before it is copied in as an attachment. -->
+    <cache-path name="camera" path="camera/" />
 </paths>

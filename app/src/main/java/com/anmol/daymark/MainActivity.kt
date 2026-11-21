@@ -61,6 +61,6 @@ class MainActivity : ComponentActivity() {
         }
         kotlin.concurrent.thread { WidgetActions.refreshAll(applicationContext) }
         // Alarms are wiped by a force-stop with no broadcast; re-set them whenever the app starts.
-        BoardStore.enqueue { runCatching { Reminders.ensureChannels(applicationContext); Reminders.sync(applicationContext, BoardStore(applicationContext).load(), force = true) } }
+        BoardStore.enqueue { runCatching { Reminders.ensureChannels(applicationContext); val snap = BoardStore(applicationContext).load(); Reminders.sync(applicationContext, snap, force = true); PinnedNotes.sync(applicationContext, snap, force = true) } }
     }
 }

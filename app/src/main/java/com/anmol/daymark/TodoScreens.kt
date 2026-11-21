@@ -9,6 +9,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableFloatStateOf
@@ -18,6 +19,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -37,6 +39,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -59,6 +62,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -110,9 +114,9 @@ internal fun GroupedTaskListScreen(
     onEditCard: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
     onReopen: (BoardCard) -> Unit,
-    onToggleImportant: (BoardCard) -> Unit,
     onMoveCard: (BoardCard, BoardColumn) -> Unit,
     onDelete: (BoardCard) -> Unit,
+    onPlaceCards: (order: List<String>, movedId: String?, toColumn: BoardColumn?) -> Unit,
     onVoice: () -> Unit
 ) {
     val selectedIndex = pages.indexOfFirst { it.id == selectedPageId }.coerceAtLeast(0)
@@ -150,6 +154,9 @@ internal fun GroupedTaskListScreen(
     val currentIndex = if (columnsMode) pagerState.currentPage else listFolder.coerceAtMost(pages.lastIndex.coerceAtLeast(0))
     val current = pages.getOrNull(currentIndex)
 
+    // A held task floats over everything here (chips included), so the screen sits in a Box with the drag layer on top.
+    val drag = remember { TaskDragState(scope) }
+    Box(Modifier.fillMaxSize()) {
     // No folder-colour wash: the page takes the tab's own glow from the backdrop, like every other tab.
     Column(Modifier.fillMaxSize()) {
         // The title shares the row with the header icons, so the folders and tasks sit higher up.
@@ -176,6 +183,8 @@ internal fun GroupedTaskListScreen(
         var menuFor by remember { mutableStateOf<String?>(null) }
         var rowRootX by remember { mutableFloatStateOf(0f) }
         var rowWidth by remember { mutableFloatStateOf(0f) }
+        var rowRootY by remember { mutableFloatStateOf(0f) }
+        var rowHeight by remember { mutableFloatStateOf(0f) }
         var fingerX by remember { mutableFloatStateOf(0f) }
         // The dragged chip rides under the finger: its offset is (finger - grab point) minus where the row currently lays it out, measured every
         // frame, so it stays put when the list re-anchors after a swap or scrolls.
@@ -202,9 +211,52 @@ internal fun GroupedTaskListScreen(
             dragOrder = movePage(order, i, to)
             lastSwap = System.currentTimeMillis()
         }
+        // Dropping a held task: a folder chip under the finger moves it there, the trash deletes it.
+        val bandPx = with(density) { 22.dp.toPx() }
+        fun inChipBand(f: Offset) = f.y in (rowRootY - bandPx)..(rowRootY + rowHeight + bandPx)
+        fun pageOf(card: BoardCard) = allColumns.firstOrNull { it.id == card.columnId }?.pageId
+        drag.onHover = {
+            val f = drag.finger
+            val own = drag.card?.let(::pageOf)
+            val page = if (!inChipBand(f)) null else chipBounds.entries
+                .firstOrNull { (_, b) -> f.x >= b.first - spacingPx / 2 && f.x <= b.first + b.second + spacingPx / 2 }?.key?.takeIf { it != own }
+            if (page != null && page != drag.hoverPage) haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            drag.hoverPage = page
+        }
+        drag.onTargetEnter = { haptic.performHapticFeedback(HapticFeedbackType.SegmentTick) }
+        drag.onTrash = { card -> haptic.performHapticFeedback(HapticFeedbackType.Confirm); onDelete(card) }
+        drag.onDrop = { card ->
+            val page = drag.hoverPage
+            val target = page?.let { id -> allColumns.firstOrNull { it.pageId == id } }
+            when {
+                target != null -> {
+                    haptic.performHapticFeedback(HapticFeedbackType.Confirm); onMoveCard(card, target)
+                    chipBounds[page]?.let { (left, width) -> Offset(left + width / 2, rowRootY + rowHeight / 2) }
+                }
+                else -> null
+            }
+        }
+        drag.onPlace = { order, toPage ->
+            val moved = drag.card?.id.takeIf { toPage != null }
+            onPlaceCards(order, moved, toPage?.let { id -> allColumns.firstOrNull { it.pageId == id } })
+        }
+        drag.onSlotChange = { haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
+        drag.onLand = { haptic.performHapticFeedback(HapticFeedbackType.GestureEnd) }
+        // While a task is held: the folders turn at the screen edges (not from up among the chips), the slot's list scrolls
+        // near its ends, and chips near the ends of their row scroll into reach.
+        DragEffects(
+            drag, pager = if (columnsMode) pagerState else null, pageIds = pages.map { it.id },
+            blockTurn = { inChipBand(it) },
+            onFrame = {
+                val f = drag.finger
+                val x = f.x - rowRootX
+                val dir = if (!inChipBand(f)) 0f else if (x < edgePx) -1f else if (x > rowWidth - edgePx) 1f else 0f
+                if (dir != 0f) { chips.scrollBy(dir * 14f); drag.onHover() }
+            }
+        )
         LazyRow(
             state = chips, contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.onGloballyPositioned { rowRootX = it.positionInRoot().x; rowWidth = it.size.width.toFloat() }.pointerInput(Unit) {
+            modifier = Modifier.onGloballyPositioned { val p = it.positionInRoot(); rowRootX = p.x; rowRootY = p.y; rowWidth = it.size.width.toFloat(); rowHeight = it.size.height.toFloat() }.pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     val rootX = rowRootX + down.position.x
@@ -265,7 +317,7 @@ internal fun GroupedTaskListScreen(
                     onDelete = if (page.id == DEFAULT_TODO_PAGE_ID) null else ({ onDeletePage(page) }),
                     taskCount = taskCount,
                     menuOpen = menuFor == page.id, onMenuDismiss = { menuFor = null },
-                    lifted = dragged, offset = { if (dragged) rowRootX + fingerX - grabDx - dragNatural else 0f },
+                    lifted = dragged || drag.hoverPage == page.id, offset = { if (dragged) rowRootX + fingerX - grabDx - dragNatural else 0f },
                     modifier = (if (dragged) Modifier.zIndex(1f) else Modifier.animateItem()).onGloballyPositioned { chipBounds[page.id] = it.positionInRoot().x to it.size.width.toFloat(); if (draggingId == page.id) dragNatural = it.positionInRoot().x }
                 ) {
                     val index = pages.indexOfFirst { it.id == page.id }.coerceAtLeast(0)
@@ -280,14 +332,11 @@ internal fun GroupedTaskListScreen(
             TaskFolder(
                 folderId = page.id,
                 cards = cards.filter { it.columnId in listIds },
-                moveTargets = pages.filter { it.id != page.id }.mapNotNull { other -> allColumns.firstOrNull { it.pageId == other.id } },
                 inList = inList,
+                drag = drag,
                 onEdit = onEditCard,
                 onComplete = onComplete,
-                onReopen = onReopen,
-                onToggleImportant = onToggleImportant,
-                onMove = onMoveCard,
-                onDelete = onDelete
+                onReopen = onReopen
             )
         }
         androidx.compose.animation.Crossfade(columnsMode, Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(260), label = "tasksLayout") { columnsShown ->
@@ -295,13 +344,16 @@ internal fun GroupedTaskListScreen(
                 state = pagerState,
                 flingBehavior = rubberFling(pagerState),
                 modifier = Modifier.fillMaxSize(),
+                // A held task's own folder must stay composed while the pager turns away from it, or its drag would end.
+                beyondViewportPageCount = if (drag.card != null) pages.size else 0,
                 key = { index -> pages.getOrNull(index)?.id ?: "empty" }
             ) { index ->
                 val page = pages.getOrNull(index) ?: return@HorizontalPager
-                LazyColumn(Modifier.fillMaxSize().bounce(pagerState, index), contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp)) {
+                val pageList = rememberLazyListState()
+                LazyColumn(Modifier.fillMaxSize().bounce(pagerState, index).dragScrollArea(drag, page.id, pageList), state = pageList, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp)) {
                     item(key = page.id) { folderCards(page, false) }
                 }
-            } else LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp)) {
+            } else LazyColumn(pages.fold(Modifier.fillMaxSize() as Modifier) { m, page -> m.dragScrollArea(drag, page.id, listState) }, state = listState, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp)) {
                 items(pages, key = { it.id }) { page ->
                     Column(Modifier.animateItem().padding(bottom = 18.dp)) {
                         val ids = allColumns.filter { it.pageId == page.id }.map { it.id }.toSet()
@@ -311,6 +363,8 @@ internal fun GroupedTaskListScreen(
                 }
             }
         }
+    }
+    TaskDragLayer(drag) { card -> TaskLineContent(card, checked = card.completed, onCheck = null) }
     }
 }
 
@@ -371,24 +425,29 @@ internal fun <T> movePage(pages: List<T>, from: Int, to: Int): List<T> {
 private fun TaskFolder(
     folderId: String,
     cards: List<BoardCard>,
-    moveTargets: List<BoardColumn>,
     inList: Boolean,
+    drag: TaskDragState,
     onEdit: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
-    onReopen: (BoardCard) -> Unit,
-    onToggleImportant: (BoardCard) -> Unit,
-    onMove: (BoardCard, BoardColumn) -> Unit,
-    onDelete: (BoardCard) -> Unit
+    onReopen: (BoardCard) -> Unit
 ) {
     val open = remember(cards) {
-        cards.filterNot { it.completed }.sortedWith(compareBy<BoardCard> { !it.important }.thenBy { it.dueDay ?: Long.MAX_VALUE }.thenByDescending { it.createdAt })
+        // Tasks placed by hand keep their order; ones never placed (new or just moved here) sit above them, sorted as before.
+        cards.filterNot { it.completed }.sortedWith(
+            compareBy<BoardCard> { it.listOrder != null }.thenBy { it.listOrder ?: 0 }
+                .thenBy { !it.important }.thenBy { it.dueDay ?: Long.MAX_VALUE }.thenByDescending { it.createdAt }
+        )
     }
     val done = remember(cards) { cards.filter { it.completed }.sortedWith(compareByDescending<BoardCard> { it.completedDay ?: 0 }.thenByDescending { it.createdAt }) }
     // Collapsed until the user taps the header; the choice is remembered per folder for the session (also across tab switches).
     var showDone by remember(folderId) { mutableStateOf(DoneExpanded[folderId] == true) }
     val chevron by animateFloatAsState(if (showDone) 0f else -90f, tween(220), label = "doneChevron")
 
-    if (cards.isEmpty()) {
+    // The held task's slot opens in whichever folder it's over (its own, or one it was carried to at the screen edge).
+    val order = open.map { it.id }
+    SideEffect { if (drag.folderOrders[folderId] != order) drag.folderOrders[folderId] = order }
+    val slotsHere = drag.card != null && drag.reorderable && drag.slotPage == folderId
+    if (cards.isEmpty() && !slotsHere) {
         if (inList) SectionCard {
             Text("No tasks yet", color = TodoMuted, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
         } else Column(Modifier.fillMaxWidth().padding(top = 70.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -398,12 +457,20 @@ private fun TaskFolder(
         return
     }
     SectionCard(Modifier.rise()) {
-        open.forEachIndexed { i, card ->
+        // While one of these is held, its row folds away; the outlined slot opens where it would land.
+        val held = drag.card?.takeIf { h -> drag.reorderable && open.any { it.id == h.id } }
+        val firstShown = open.firstOrNull { it.id != held?.id }?.id
+        open.forEach { card ->
             key(card.id) {
-                if (i > 0) RowDivider()
-                TaskLine(card, moveTargets, Modifier, onEdit, onComplete, onReopen, onToggleImportant, onMove, onDelete)
+                if (slotsHere && card.id != held?.id) {
+                    val index = drag.siblings.indexOf(card.id)
+                    DropSlot(drag, index, startOpen = !drag.switched && index == drag.originSlot)
+                }
+                if (card.id != firstShown && card.id != held?.id) RowDivider()
+                TaskLine(card, drag, folderId, onEdit, onComplete, onReopen, folderOrder = order)
             }
         }
+        if (slotsHere) key("slot-end") { DropSlot(drag, drag.siblings.size, startOpen = !drag.switched && drag.originSlot == drag.siblings.size) }
         if (done.isNotEmpty()) {
             if (open.isNotEmpty()) WavyDivider(Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
             Row(
@@ -417,33 +484,50 @@ private fun TaskFolder(
             if (showDone) done.forEach { card ->
                 key(card.id) {
                     RowDivider()
-                    TaskLine(card, moveTargets, Modifier, onEdit, onComplete, onReopen, onToggleImportant, onMove, onDelete)
+                    TaskLine(card, drag, folderId, onEdit, onComplete, onReopen)
                 }
             }
         }
     }
 }
 
-/** One task: a round check, the title, and a quiet line of details underneath. */
+/**
+ * One task: a round check, the title, and a quiet line of details underneath. Tap to edit; hold to lift it out
+ * ([drag]) and drop it on another folder's chip or the trash.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TaskLine(
     card: BoardCard,
-    moveTargets: List<BoardColumn>,
-    modifier: Modifier,
+    drag: TaskDragState,
+    folderId: String,
     onEdit: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
     onReopen: (BoardCard) -> Unit,
-    onToggleImportant: (BoardCard) -> Unit,
-    onMove: (BoardCard, BoardColumn) -> Unit,
-    onDelete: (BoardCard) -> Unit
+    folderOrder: List<String>? = null
 ) {
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
-    var menu by remember { mutableStateOf(false) }
     // Tick immediately, then let the task glide down to Completed a beat later.
     var ticking by remember(card.id, card.completed) { mutableStateOf(false) }
-    val checked = card.completed || ticking
+    // Completed tasks can be moved or deleted by dragging, but stay in finishing order.
+    Box(
+        Modifier.fillMaxWidth().dragRow(drag, card, folderId, folderOrder.takeIf { !card.completed }) { onEdit(card) }
+    ) {
+        TaskLineContent(card, checked = card.completed || ticking, onCheck = {
+            if (card.completed) onReopen(card)
+            else if (!ticking) {
+                ticking = true
+                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                scope.launch { delay(260); onComplete(card) }
+            }
+        })
+    }
+}
+
+/** The look of a task row, shared by the row in its folder and the copy lifted under the finger ([onCheck] null: not tappable). */
+@Composable
+internal fun TaskLineContent(card: BoardCard, checked: Boolean, onCheck: (() -> Unit)?) {
     val ring by animateColorAsState(if (checked) CalendarBlue else TodoMuted.copy(alpha = .6f), tween(180), label = "checkRing")
     val fill by animateColorAsState(if (checked) CalendarBlue else Color.Transparent, tween(180), label = "checkFill")
     val tick by animateFloatAsState(if (checked) 1f else 0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "tick")
@@ -451,53 +535,33 @@ private fun TaskLine(
     val due = listOfNotNull(card.dueDay?.let(::formatDue), card.dueMinute?.let(::formatClock)).joinToString(" · ")
     val overdue = !card.completed && card.dueDay != null && card.dueDay < today
     val note = card.details.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }
-
-    Box(modifier) {
-        Row(
-            Modifier.fillMaxWidth()
-                .combinedClickable(onClick = { onEdit(card) }, onLongClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu = true })
-                .padding(horizontal = 14.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.Top
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.Top) {
+        val shape = checkShape(checked)
+        Box(
+            Modifier.padding(top = 1.dp).size(26.dp).clip(shape).background(fill).border(1.5.dp, ring, shape)
+                .then(if (onCheck != null) Modifier.clickable(onClick = onCheck) else Modifier)
+                .semantics { contentDescription = if (checked) "Mark not done" else "Mark done" },
+            contentAlignment = Alignment.Center
         ) {
-            val shape = checkShape(checked)
-            Box(
-                Modifier.padding(top = 1.dp).size(26.dp).clip(shape).background(fill).border(1.5.dp, ring, shape)
-                    .clickable {
-                        if (card.completed) onReopen(card)
-                        else if (!ticking) {
-                            ticking = true
-                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                            scope.launch { delay(260); onComplete(card) }
-                        }
-                    }
-                    .semantics { contentDescription = if (checked) "Mark not done" else "Mark done" },
-                contentAlignment = Alignment.Center
-            ) {
-                Glyph(ZenIcon.Check, OnFill, 15.dp, modifier = Modifier.scale(tick).alpha(tick))
-            }
-            Column(Modifier.weight(1f).padding(start = 16.dp)) {
-                Text(
-                    card.title,
-                    color = if (checked) TodoMuted else TodoText,
-                    fontSize = 17.sp,
-                    lineHeight = 22.sp,
-                    textDecoration = if (checked) TextDecoration.LineThrough else null,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (note != null || due.isNotEmpty() || card.important) {
-                    Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (card.important && !checked) Glyph(ZenIcon.StarFilled, Amber, 12.dp, modifier = Modifier.padding(end = 6.dp))
-                        if (due.isNotEmpty()) MetaLine(due, if (overdue) Danger else TodoMuted, 13.sp, Modifier.padding(end = if (note != null) 12.dp else 0.dp), leading = ZenIcon.Calendar, badges = badgesFor(card))
-                        if (note != null) MetaLine(note, TodoMuted, 13.sp, leading = ZenIcon.Lines)
-                    }
+            Glyph(ZenIcon.Check, OnFill, 15.dp, modifier = Modifier.scale(tick).alpha(tick))
+        }
+        Column(Modifier.weight(1f).padding(start = 16.dp)) {
+            Text(
+                card.title,
+                color = if (checked) TodoMuted else TodoText,
+                fontSize = 17.sp,
+                lineHeight = 22.sp,
+                textDecoration = if (checked) TextDecoration.LineThrough else null,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (note != null || due.isNotEmpty() || card.important) {
+                Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (card.important && !checked) Glyph(ZenIcon.StarFilled, Amber, 12.dp, modifier = Modifier.padding(end = 6.dp))
+                    if (due.isNotEmpty()) MetaLine(due, if (overdue) Danger else TodoMuted, 13.sp, Modifier.padding(end = if (note != null) 12.dp else 0.dp), leading = ZenIcon.Calendar, badges = badgesFor(card))
+                    if (note != null) MetaLine(note, TodoMuted, 13.sp, leading = ZenIcon.Lines)
                 }
             }
-        }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text(if (card.important) "Remove priority" else "Mark important") }, onClick = { menu = false; onToggleImportant(card) })
-            moveTargets.forEach { target -> DropdownMenuItem(text = { Text("Move to ${target.name}") }, onClick = { menu = false; onMove(card, target) }) }
-            DropdownMenuItem(text = { Text("Delete", color = Danger) }, onClick = { menu = false; onDelete(card) })
         }
     }
 }

@@ -512,29 +512,6 @@ fun MarkdownText(source: String, modifier: Modifier = Modifier, maxBlocks: Int =
     }
 }
 
-/** Formatting row that sits directly above the keyboard while writing a note; [active] glyphs are highlighted. */
-@Composable
-fun NoteToolbar(actions: List<Pair<String, () -> Unit>>, active: Set<String> = emptySet()) {
-    Column(Modifier.fillMaxWidth()) {
-        HorizontalDivider(color = TodoBorder)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            actions.forEach { (label, action) ->
-                Box(
-                    Modifier.weight(1f).height(42.dp).padding(horizontal = 1.dp).clip(RoundedCornerShape(12.dp))
-                        .background(if (label in active) GlassAccent else Color.Transparent).clickable(onClick = action),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val icon = ToolbarIcons[label]
-                    if (icon != null) Glyph(icon, if (label in active) TodoText else TodoMuted, 20.dp)
-                    else Text(label, color = if (label in active) TodoText else TodoMuted, fontSize = if (label == "H") 18.sp else 15.sp, fontWeight = if (label == "H") FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
-                }
-            }
-        }
-    }
-}
-
-private val ToolbarIcons = mapOf("•" to ZenIcon.Lines, "☐" to ZenIcon.Checkbox, "❝" to ZenIcon.Quote, "🖼" to ZenIcon.Picture, "―" to ZenIcon.Minus, "▦" to ZenIcon.Table, "✎" to ZenIcon.Pencil, "📎" to ZenIcon.Paperclip)
-
 private class DoodleStroke(val color: Color, val points: List<Offset>)
 
 private val DoodleColors = listOf(Color(0xFFEDEAE3), Color(0xFFB4CDBF), Color(0xFFD9BC8C), Color(0xFFDE8E80), Color(0xFF9DB7D0))

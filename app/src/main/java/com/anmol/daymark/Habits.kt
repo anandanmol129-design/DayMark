@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -131,7 +132,8 @@ internal fun HabitsScreen(
     onStartFocus: (BoardCard, Int) -> Unit,
     onSetFocusMinutes: (BoardCard, Int) -> Unit,
     onStopFocus: () -> Unit,
-    onDeleteTracker: (BoardCard) -> Unit
+    onDeleteTracker: (BoardCard) -> Unit,
+    onPlaceHabits: (List<String>) -> Unit = {}
 ) {
     val pager = rememberPagerState(initialPage = page.coerceIn(0, 1)) { 2 }
     val scope = rememberCoroutineScope()
@@ -141,7 +143,7 @@ internal fun HabitsScreen(
     Column(Modifier.fillMaxSize()) {
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), flingBehavior = rubberFling(pager), pageSpacing = 16.dp, beyondViewportPageCount = 1) { index ->
             if (index == 0) FocusPage(trackers, onStartFocus, onSetFocusMinutes, onStopFocus, onDeleteTracker, Modifier.fillMaxSize().bounce(pager, index))
-            else HabitsPage(habits, onToggleDay, onEdit, onDelete, onAdd, Modifier.fillMaxSize().bounce(pager, index))
+            else HabitsPage(habits, onToggleDay, onEdit, onDelete, onAdd, onPlaceHabits, Modifier.fillMaxSize().bounce(pager, index))
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             (0..1).forEach { index -> PagerDot(pager.currentPage == index) { scope.launch { pager.animateScrollToPage(index, animationSpec = PageSpring) } } }
@@ -157,16 +159,30 @@ private fun HabitsPage(
     onEdit: (BoardCard) -> Unit,
     onDelete: (BoardCard) -> Unit,
     onAdd: () -> Unit,
+    onPlaceHabits: (List<String>) -> Unit,
     modifier: Modifier
 ) {
     val today = LocalDate.now().toEpochDay()
+    // Hold a habit to lift it: drop it between others to reorder, or on the trash under the list.
+    val haptic = LocalHapticFeedback.current
+    val dragScope = rememberCoroutineScope()
+    val drag = remember { TaskDragState(dragScope) }
+    drag.onTargetEnter = { haptic.performHapticFeedback(HapticFeedbackType.SegmentTick) }
+    drag.onTrash = { habit -> haptic.performHapticFeedback(HapticFeedbackType.Confirm); onDelete(habit) }
+    drag.onSlotChange = { haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) }
+    drag.onLand = { haptic.performHapticFeedback(HapticFeedbackType.GestureEnd) }
+    drag.onPlace = { order, _ -> onPlaceHabits(order) }
+    val order = habits.map { it.id }
+    androidx.compose.runtime.SideEffect { if (drag.folderOrders[HabitsFolder] != order) drag.folderOrders[HabitsFolder] = order }
+    DragEffects(drag)
     // Month and year are two pages side by side: swipe between them, or tap the toggle.
     var savedPage by rememberSaveable { mutableIntStateOf(0) }
     val pager = rememberPagerState(initialPage = savedPage) { 2 }
     val scope = rememberCoroutineScope()
     LaunchedEffect(pager.currentPage) { savedPage = pager.currentPage }
     val done = habits.count { it.checkedOn(today) }
-    Column(modifier) {
+    Box(modifier) {
+    Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 14.dp, bottom = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(todayLabel(), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, modifier = Modifier.weight(1f))
@@ -194,16 +210,39 @@ private fun HabitsPage(
             }
         } else HorizontalPager(pager, Modifier.fillMaxSize(), flingBehavior = rubberFling(pager), beyondViewportPageCount = 1, key = { it }) { page ->
             val yearView = page == 1
-            LazyColumn(Modifier.fillMaxSize().bounce(pager, page), contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)) {
+            // Month and year both stay composed; only the one on screen takes part in a drag.
+            val shown = page == pager.currentPage
+            val listState = rememberLazyListState()
+            LazyColumn(
+                Modifier.fillMaxSize().bounce(pager, page).then(if (shown) Modifier.dragScrollArea(drag, HabitsFolder, listState) else Modifier),
+                state = listState, contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp)
+            ) {
                 items(habits, key = { it.id }) { habit ->
-                    Box(Modifier.animateItem().padding(horizontal = 14.dp, vertical = 6.dp)) {
-                        HabitCard(habit, today, yearView, onToggleDay = { onToggleDay(habit, it) }, onEdit = { onEdit(habit) }, onDelete = { onDelete(habit) })
+                    Column(Modifier.animateItem().padding(horizontal = 14.dp)) {
+                        if (shown && drag.card != null && drag.reorderable && habit.id != drag.card?.id) {
+                            val index = drag.siblings.indexOf(habit.id)
+                            DropSlot(drag, index, startOpen = index == drag.originSlot)
+                        }
+                        HabitCard(
+                            habit, today, yearView, onToggleDay = { onToggleDay(habit, it) },
+                            modifier = Modifier.padding(vertical = 6.dp).dragRow(drag, habit, HabitsFolder, order, HabitShape, report = shown) { onEdit(habit) }
+                        )
+                    }
+                }
+                item(key = "slot-end") {
+                    if (shown && drag.card != null && drag.reorderable) Box(Modifier.padding(horizontal = 14.dp)) {
+                        DropSlot(drag, drag.siblings.size, startOpen = drag.originSlot == drag.siblings.size)
                     }
                 }
             }
         }
     }
+    TaskDragLayer(drag, HabitShape) { habit -> HabitCard(habit, today, pager.currentPage == 1, onToggleDay = {}) }
+    }
 }
+
+private const val HabitsFolder = "habits"
+private val HabitShape = RoundedCornerShape(20.dp)
 
 @Composable
 private fun Segment(label: String, selected: Boolean, onClick: () -> Unit) {
@@ -219,16 +258,16 @@ private fun Segment(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HabitCard(habit: BoardCard, today: Long, yearView: Boolean, onToggleDay: (Long) -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun HabitCard(habit: BoardCard, today: Long, yearView: Boolean, onToggleDay: (Long) -> Unit, modifier: Modifier = Modifier) {
     val color = habitColor(habit)
     val days = remember(habit.checkIns) { habit.checkIns.toHashSet() }
     val streak = currentStreak(days, today)
     val best = remember(habit.checkIns) { bestStreak(habit.checkIns) }
     val checked = today in days
     val haptics = LocalHapticFeedback.current
-    var menu by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(20.dp)
-    Surface(color = TodoCard, shape = shape, border = GlassStroke, modifier = Modifier.glassBlur(shape).fillMaxWidth().clip(shape).combinedClickable(onClick = onEdit, onLongClick = { menu = true })) {
+    // Tap to edit and hold to drag come in through [modifier] (see dragRow).
+    val shape = HabitShape
+    Surface(color = TodoCard, shape = shape, border = GlassStroke, modifier = modifier.glassBlur(shape).fillMaxWidth()) {
         Column(Modifier.padding(start = 16.dp, end = 14.dp, top = 14.dp, bottom = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(color))
@@ -245,10 +284,6 @@ private fun HabitCard(habit: BoardCard, today: Long, yearView: Boolean, onToggle
                         .semantics { contentDescription = if (checked) "Undo today's check-in" else "Check in today" },
                     contentAlignment = Alignment.Center
                 ) { if (checked) Glyph(ZenIcon.Check, OnAccent, 19.dp) }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
-                    DropdownMenuItem(text = { Text("Delete", color = Danger) }, onClick = { menu = false; onDelete() })
-                }
             }
             Spacer(Modifier.height(14.dp))
             if (yearView) YearGrid(days, today, color, onToggleDay) else MonthGrid(days, today, color, onToggleDay)

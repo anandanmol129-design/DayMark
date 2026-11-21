@@ -36,6 +36,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import kotlinx.coroutines.delay
@@ -60,7 +62,8 @@ internal fun NotesPagesScreen(
     onDelete: (BoardCard) -> Unit,
     privateOpen: Boolean = false,
     onTogglePrivate: (BoardCard) -> Unit = {},
-    onLockPrivate: () -> Unit = {}
+    onLockPrivate: () -> Unit = {},
+    onPlaceCards: (List<String>, String?, BoardColumn?) -> Unit = { _, _, _ -> }
 ) {
     val selectedIndex = pages.indexOfFirst { it.id == selectedPageId }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = selectedIndex, pageCount = { pages.size.coerceAtLeast(1) })
@@ -80,12 +83,45 @@ internal fun NotesPagesScreen(
         }
     }
 
+    // Hold a note to lift it: drop it between notes to reorder, at a screen edge to carry it to the next folder,
+    // or on the share, lock (Private, or back out of it) or trash bins under the list.
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val drag = remember { TaskDragState(scope) }
+    var sharing by remember { androidx.compose.runtime.mutableStateOf<BoardCard?>(null) }
+    val togglePrivate = rememberUpdatedState(onTogglePrivate)
+    drag.extraBins = remember {
+        val confirm = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm) }
+        listOf(
+            // The sheet opens once the note has flown into the bin.
+            DragBin(ZenIcon.Share, { CalendarBlue }) { note -> confirm(); scope.launch { delay(230); sharing = note } },
+            DragBin(ZenIcon.Lock, { Amber }) { note -> confirm(); togglePrivate.value(note) }
+        )
+    }
+    drag.onTargetEnter = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentTick) }
+    drag.onTrash = { note -> haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm); onDelete(note) }
+    drag.onSlotChange = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentFrequentTick) }
+    drag.onLand = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureEnd) }
+    drag.onPlace = { order, toPage ->
+        val moved = drag.card?.id.takeIf { toPage != null }
+        onPlaceCards(order, moved, toPage?.let { id -> allColumns.firstOrNull { it.pageId == id } })
+    }
+    val columnsMode = Layouts.columns(Layouts.NOTES)
+    // In the stacked list, a held note's slot follows the folder section under the finger.
+    val sectionTops = remember { HashMap<String, Float>() }
+    DragEffects(
+        drag, pager = if (columnsMode) pagerState else null, pageIds = pages.map { it.id },
+        canTurnTo = { it != DEFAULT_SAVED_PAGE_ID }, // saves are links and pictures, not a place for notes
+        onFrame = {
+            if (!columnsMode) pages.filter { it.id != DEFAULT_SAVED_PAGE_ID && (sectionTops[it.id] ?: Float.MAX_VALUE) <= drag.finger.y }
+                .maxByOrNull { sectionTops[it.id] ?: 0f }?.let { drag.enterFolder(it.id) }
+        }
+    )
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
     // No folder-colour wash: the page takes the tab's own glow from the backdrop, like every other tab.
     Column(Modifier.fillMaxSize()) {
         androidx.compose.animation.AnimatedVisibility(privateOpen) { PrivateBanner(onLockPrivate) }
-        val columnsMode = Layouts.columns(Layouts.NOTES)
         val pageFor: @Composable (BoardPage?, Modifier) -> Unit = { page, modifier ->
-            NotesFolderPage(page, pages, allColumns, cards, modifier, onNewPage, onDeletePage, onRenamePage, onEditCard, onPickImages, onAddCard, onMoveCard, onDelete, privateOpen, onTogglePrivate)
+            NotesFolderPage(page, pages, allColumns, cards, modifier, onNewPage, onDeletePage, onRenamePage, onEditCard, onPickImages, onAddCard, onDelete, privateOpen, onTogglePrivate, drag)
         }
         androidx.compose.animation.Crossfade(columnsMode, Modifier.weight(1f).fillMaxWidth(), animationSpec = androidx.compose.animation.core.tween(260), label = "notesLayout") { columnsShown ->
             if (columnsShown) Column(Modifier.fillMaxSize()) {
@@ -94,6 +130,8 @@ internal fun NotesPagesScreen(
                     flingBehavior = rubberFling(pagerState),
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     pageSpacing = 16.dp,
+                    // A held note's own folder must stay composed while the pager turns away from it, or its drag would end.
+                    beyondViewportPageCount = if (drag.card != null) pages.size else 0,
                     key = { index -> pages.getOrNull(index)?.id ?: "empty" }
                 ) { pageIndex -> pageFor(pages.getOrNull(pageIndex), Modifier.fillMaxSize().bounce(pagerState, pageIndex)) }
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -101,8 +139,39 @@ internal fun NotesPagesScreen(
                         PagerDot(pagerState.currentPage == index) { scope.launch { pagerState.animateScrollToPage(index, animationSpec = PageSpring) } }
                     }
                 }
-            } else NotesListLayout(pages, allColumns, cards, selectedPageId, onSelectPage, onNewPage, onEditCard, onMoveCard, onDelete, onTogglePrivate, privateOpen) { saved, modifier -> pageFor(saved, modifier) }
+            } else NotesListLayout(pages, allColumns, cards, selectedPageId, onSelectPage, onNewPage, onEditCard, privateOpen, drag, sectionTops) { saved, modifier -> pageFor(saved, modifier) }
         }
+    }
+    TaskDragLayer(drag, NoteShape) { note -> NoteTileContent(note) }
+    }
+    sharing?.let { note -> NoteShareSheet(note) { sharing = null } }
+}
+
+private val NoteShape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp)
+
+/** Notes placed by hand keep their order; ones never placed (new, or just moved in) sit above them, newest first. */
+private fun notesInOrder(notes: List<BoardCard>) =
+    notes.sortedWith(compareBy<BoardCard> { it.listOrder != null }.thenBy { it.listOrder ?: 0 }.thenByDescending { it.createdAt })
+
+/**
+ * A folder's notes for a lazy list: each note (with the drop slot above it while one is held over this folder) and
+ * the slot after the last. The held note's own row folds away while it's carried.
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.noteRows(
+    folderId: String, notes: List<BoardCard>, drag: TaskDragState, onEditCard: (BoardCard) -> Unit
+) {
+    val order = notes.map { it.id }
+    items(notes, key = { it.id }) { note ->
+        Column(Modifier.animateItem()) {
+            if (drag.card != null && drag.reorderable && drag.slotPage == folderId && note.id != drag.card?.id) {
+                val index = drag.siblings.indexOf(note.id)
+                DropSlot(drag, index, startOpen = !drag.switched && index == drag.originSlot)
+            }
+            NoteTile(note, Modifier.dragRow(drag, note, folderId, order, NoteShape) { onEditCard(note) })
+        }
+    }
+    item(key = "slot-end-$folderId") {
+        if (drag.card != null && drag.reorderable && drag.slotPage == folderId) DropSlot(drag, drag.siblings.size, startOpen = !drag.switched && drag.originSlot == drag.siblings.size)
     }
 }
 
@@ -146,43 +215,30 @@ internal fun ColumnListScreen(
 }
 
 
-/** A note as a small page: header image if any, a clear title, the date, then the body in reading type. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** A note as a small page: header image if any, a clear title, the date, then the body in reading type. Hold to drag it. */
 @Composable
-private fun NoteTile(note: BoardCard, moveTargets: List<BoardColumn>, onMove: (BoardColumn) -> Unit, onDelete: () -> Unit, onOpen: () -> Unit, onTogglePrivate: () -> Unit) {
-    var menu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp)
+private fun NoteTile(note: BoardCard, modifier: Modifier) {
+    androidx.compose.material3.Surface(color = TodoCard, shape = NoteShape, border = GlassStroke, modifier = modifier.glassBlur(NoteShape).fillMaxWidth()) {
+        NoteTileContent(note)
+    }
+}
+
+@Composable
+private fun NoteTileContent(note: BoardCard) {
     val header = rememberSavedBitmap(note.imagePath)
-    Box {
-        androidx.compose.material3.Surface(
-            color = TodoCard, shape = shape, border = GlassStroke,
-            modifier = Modifier.glassBlur(shape).fillMaxWidth().clip(shape).combinedClickable(onClick = onOpen, onLongClick = { menu = true })
-        ) {
-            Column {
-                header?.let {
-                    Image(it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(150.dp))
-                }
-                Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 18.dp)) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Column(Modifier.weight(1f)) {
-                            if (note.title.isNotBlank()) Text(note.title, color = TodoText, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                            Text(noteDate(note.createdAt), color = TodoMuted.copy(alpha = .8f), fontSize = 12.sp, letterSpacing = .3.sp, modifier = Modifier.padding(top = 3.dp))
-                        }
-                        Glyph(ZenIcon.More, TodoMuted, 20.dp, modifier = Modifier.clip(androidx.compose.foundation.shape.CircleShape).clickable { menu = true }.padding(start = 6.dp))
-                    }
-                    if (note.link.isNotBlank()) MetaLine(note.link, TodoBlue, 13.sp, Modifier.padding(top = 10.dp), leading = ZenIcon.Link)
-                    if (note.details.isNotBlank()) {
-                        Spacer(Modifier.height(12.dp))
-                        MarkdownText(note.details, maxBlocks = 12, reading = true, skipHeading = note.title)
-                    }
-                    if (note.comment.isNotBlank()) CommentPreview(note.comment, 6, Modifier.padding(top = 10.dp))
-                }
-            }
+    Column {
+        header?.let {
+            Image(it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(150.dp))
         }
-        androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            moveTargets.forEach { column -> androidx.compose.material3.DropdownMenuItem(text = { Text("Move to ${column.name}") }, onClick = { menu = false; onMove(column) }) }
-            androidx.compose.material3.DropdownMenuItem(text = { Text(if (note.isPrivate) "Remove from Private" else "Move to Private") }, onClick = { menu = false; onTogglePrivate() })
-            androidx.compose.material3.DropdownMenuItem(text = { Text("Delete", color = Danger) }, onClick = { menu = false; onDelete() })
+        Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 18.dp)) {
+            if (note.title.isNotBlank()) Text(note.title, color = TodoText, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text(noteDate(note.createdAt), color = TodoMuted.copy(alpha = .8f), fontSize = 12.sp, letterSpacing = .3.sp, modifier = Modifier.padding(top = 3.dp))
+            if (note.link.isNotBlank()) MetaLine(note.link, TodoBlue, 13.sp, Modifier.padding(top = 10.dp), leading = ZenIcon.Link)
+            if (note.details.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                MarkdownText(note.details, maxBlocks = 12, reading = true, skipHeading = note.title)
+            }
+            if (note.comment.isNotBlank()) CommentPreview(note.comment, 6, Modifier.padding(top = 10.dp))
         }
     }
 }
@@ -223,14 +279,20 @@ private fun NotesFolderPage(
     onEditCard: (BoardCard) -> Unit,
     onPickImages: () -> Unit,
     onAddCard: (BoardColumn) -> Unit,
-    onMoveCard: (BoardCard, BoardColumn) -> Unit,
     onDelete: (BoardCard) -> Unit,
     privateOpen: Boolean,
-    onTogglePrivate: (BoardCard) -> Unit
+    onTogglePrivate: (BoardCard) -> Unit,
+    drag: TaskDragState
 ) {
     val folder = page?.let { target -> allColumns.firstOrNull { it.pageId == target.id } }
-    val folderNotes = cards.filter { it.columnId == folder?.id }.sortedByDescending { it.createdAt }
     val isSaved = page?.id == DEFAULT_SAVED_PAGE_ID
+    val folderNotes = cards.filter { it.columnId == folder?.id }.let { if (isSaved) it.sortedByDescending { n -> n.createdAt } else notesInOrder(it) }
+    val folderId = page?.id.orEmpty()
+    if (!isSaved && page != null) {
+        val order = folderNotes.map { it.id }
+        androidx.compose.runtime.SideEffect { if (drag.folderOrders[folderId] != order) drag.folderOrders[folderId] = order }
+    }
+    val slotsHere = !isSaved && drag.card != null && drag.reorderable && drag.slotPage == folderId
 
     Column(modifier) {
         Row(
@@ -255,7 +317,7 @@ private fun NotesFolderPage(
         )
         if (isSaved && folderNotes.isNotEmpty()) {
             SavedGrid(folderNotes, onOpen = onEditCard, onDelete = onDelete, onTogglePrivate = onTogglePrivate, modifier = Modifier.weight(1f).fillMaxWidth())
-        } else if (folderNotes.isEmpty()) {
+        } else if (folderNotes.isEmpty() && !slotsHere) {
             Column(Modifier.weight(1f).fillMaxWidth().padding(bottom = 40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Glyph(if (privateOpen) ZenIcon.Lock else if (isSaved) ZenIcon.Bookmark else ZenIcon.Note, TodoMuted.copy(alpha = .7f), 44.dp)
                 Spacer(Modifier.height(12.dp))
@@ -265,23 +327,14 @@ private fun NotesFolderPage(
                 folder?.let { TextButton(onClick = { onAddCard(it) }) { Text("Add note", color = TodoBlue) } }
             }
         } else {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.weight(1f).fillMaxWidth().dragScrollArea(drag, folderId, listState),
+                state = listState,
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(folderNotes, key = { it.id }) { note ->
-                  Box(Modifier.animateItem()) {
-                    NoteTile(
-                        note = note,
-                        moveTargets = allColumns.filter { it.id != note.columnId },
-                        onMove = { onMoveCard(note, it) },
-                        onDelete = { onDelete(note) },
-                        onOpen = { onEditCard(note) },
-                        onTogglePrivate = { onTogglePrivate(note) }
-                    )
-                  }
-                }
+                noteRows(folderId, folderNotes, drag, onEditCard)
                 folder?.let { currentFolder ->
                     item {
                         TextButton(onClick = { onAddCard(currentFolder) }, modifier = Modifier.fillMaxWidth()) {
@@ -307,10 +360,9 @@ private fun NotesListLayout(
     onSelectPage: (String) -> Unit,
     onNewPage: () -> Unit,
     onEditCard: (BoardCard) -> Unit,
-    onMoveCard: (BoardCard, BoardColumn) -> Unit,
-    onDelete: (BoardCard) -> Unit,
-    onTogglePrivate: (BoardCard) -> Unit,
     privateOpen: Boolean,
+    drag: TaskDragState,
+    sectionTops: HashMap<String, Float>,
     savedPage: @Composable (BoardPage, Modifier) -> Unit
 ) {
     val saved = pages.firstOrNull { it.id == DEFAULT_SAVED_PAGE_ID }
@@ -332,9 +384,14 @@ private fun NotesListLayout(
                 val notesByFolder = remember(cards, folders, allColumns) {
                     folders.map { page ->
                         val ids = allColumns.filter { it.pageId == page.id }.map { it.id }.toSet()
-                        page to cards.filter { it.columnId in ids }.sortedByDescending { it.createdAt }
+                        page to notesInOrder(cards.filter { it.columnId in ids })
                     }
                 }
+                notesByFolder.forEach { (page, notes) ->
+                    val order = notes.map { it.id }
+                    androidx.compose.runtime.SideEffect { if (drag.folderOrders[page.id] != order) drag.folderOrders[page.id] = order }
+                }
+                val listState = androidx.compose.foundation.lazy.rememberLazyListState()
                 Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 18.dp, bottom = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                     PageTitle("Notes", deletable = false, onDelete = {}, modifier = Modifier.weight(1f))
                     HeaderIcon(ZenIcon.Folder, "New folder", onClick = onNewPage)
@@ -347,27 +404,24 @@ private fun NotesListLayout(
                     color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 22.dp, bottom = 4.dp)
                 )
                 LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    modifier = notesByFolder.fold(Modifier.weight(1f).fillMaxWidth() as Modifier) { m, (page, _) -> m.dragScrollArea(drag, page.id, listState) },
+                    state = listState,
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     notesByFolder.forEach { (page, notes) ->
-                        item(key = "label-" + page.id) { SectionLabel(page.name, notes.size.takeIf { it > 0 }?.toString(), modifier = Modifier.animateItem().padding(top = 8.dp)) }
-                        if (notes.isEmpty()) item(key = "empty-" + page.id) {
+                        item(key = "label-" + page.id) {
+                            SectionLabel(
+                                page.name, notes.size.takeIf { it > 0 }?.toString(),
+                                modifier = Modifier.animateItem().padding(top = 8.dp)
+                                    .onGloballyPositioned { sectionTops[page.id] = it.positionInRoot().y }
+                            )
+                        }
+                        // An empty folder says so, unless a held note's slot is open in it.
+                        if (notes.isEmpty() && !(drag.card != null && drag.reorderable && drag.slotPage == page.id)) item(key = "empty-" + page.id) {
                             Text("No notes yet", color = TodoMuted, fontSize = 14.sp, modifier = Modifier.animateItem().padding(start = 8.dp, bottom = 4.dp))
                         }
-                        items(notes, key = { it.id }) { note ->
-                            Box(Modifier.animateItem()) {
-                                NoteTile(
-                                    note = note,
-                                    moveTargets = allColumns.filter { it.id != note.columnId },
-                                    onMove = { onMoveCard(note, it) },
-                                    onDelete = { onDelete(note) },
-                                    onOpen = { onEditCard(note) },
-                                    onTogglePrivate = { onTogglePrivate(note) }
-                                )
-                            }
-                        }
+                        noteRows(page.id, notes, drag, onEditCard)
                     }
                 }
             }

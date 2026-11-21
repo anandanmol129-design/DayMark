@@ -92,7 +92,9 @@ data class BoardCard(
     /** The phone calendar event this card was copied to by [CalendarSync] (Daymark's own events and timed to-dos); null if none. */
     val providerEventId: Long? = null,
     /** A Focus tracker's (TIMER card's) finished sessions, oldest first. See Focus.kt. */
-    val sessions: List<FocusSession> = emptyList()
+    val sessions: List<FocusSession> = emptyList(),
+    /** Place in its to-do folder when the user has arranged it by hand (0 = top); null keeps the automatic order. */
+    val listOrder: Int? = null
 )
 
 data class BoardSnapshot(
@@ -161,6 +163,7 @@ class BoardStore(context: Context) {
     fun save(snapshot: BoardSnapshot) {
         prefs.edit().putString("snapshot", encode(snapshot)).apply()
         runCatching { Reminders.sync(appContext, snapshot) }
+        runCatching { PinnedNotes.sync(appContext, snapshot) }
         runCatching { CalendarSync.schedulePush(appContext) }
     }
 
@@ -232,6 +235,7 @@ private fun BoardCard.toJson() = JSONObject().apply {
     put("remind", remind); put("remindLeadMinutes", remindLeadMinutes)
     put("habitColor", habitColor); put("habitEvent", habitEvent)
     put("providerEventId", providerEventId ?: JSONObject.NULL)
+    if (listOrder != null) put("listOrder", listOrder)
     if (sessions.isNotEmpty()) put("sessions", JSONArray().apply { sessions.forEach { put(it.toJson()) } })
 }
 
@@ -394,6 +398,7 @@ private fun JSONArray.toCards() = (0 until length()).map { i ->
         habitColor = item.optInt("habitColor", -1).coerceIn(-1, HabitPalette.size - 1),
         habitEvent = item.optBoolean("habitEvent"),
         providerEventId = if (item.isNull("providerEventId")) null else item.optLong("providerEventId").takeIf { it > 0 },
-        sessions = item.optJSONArray("sessions").toSessions()
+        sessions = item.optJSONArray("sessions").toSessions(),
+        listOrder = if (item.isNull("listOrder")) null else item.optInt("listOrder")
     )
 }

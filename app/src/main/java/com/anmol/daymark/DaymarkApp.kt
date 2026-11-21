@@ -192,7 +192,8 @@ internal fun DaymarkApp(
     }
 
     /** Habits in the order they were started; time trackers stay hidden. */
-    val habits = remember(snapshot.cards) { snapshot.cards.filter { it.kind == CardKind.HABIT }.sortedBy { it.createdAt } }
+    // Habits placed by hand keep their order; new ones join at the bottom.
+    val habits = remember(snapshot.cards) { snapshot.cards.filter { it.kind == CardKind.HABIT }.sortedWith(compareBy<BoardCard> { it.listOrder == null }.thenBy { it.listOrder ?: 0 }.thenBy { it.createdAt }) }
     fun toggleHabitDay(card: BoardCard, day: Long) = update(snapshot.toggleCheckIn(card.id, day, LocalDate.now().toEpochDay()))
     /** A blank habit in the Habits column, wearing the first colour no habit has yet. */
     fun newHabit(): BoardCard {
@@ -571,7 +572,12 @@ internal fun DaymarkApp(
                     showComposer = true
                 } else if (workspace == Workspace.TRACK && trackPage == 0) FocusUi.editor = ""
                 else if (workspace == Workspace.TRACK) { editingCardId = null; showComposer = true }
-                else { draftColumnId = columns.firstOrNull()?.id.orEmpty(); showComposer = true }
+                else {
+                    // A new calendar item lands on the day the calendar is showing.
+                    composerDay = CalendarUi.shownDay
+                    draftColumnId = CalendarUi.shownDay?.let { calendarColumnFor(columns, it, columns.firstOrNull()?.id.orEmpty()) } ?: columns.firstOrNull()?.id.orEmpty()
+                    showComposer = true
+                }
             })
           }
         }
@@ -637,7 +643,11 @@ internal fun DaymarkApp(
                 onStartFocus = ::startFocus,
                 onSetFocusMinutes = { card, minutes -> update(snapshot.copy(cards = snapshot.cards.map { if (it.id == card.id) it.copy(durationMinutes = minutes) else it })) },
                 onStopFocus = { finishFocus(completed = false) },
-                onDeleteTracker = ::deleteTracker
+                onDeleteTracker = ::deleteTracker,
+                onPlaceHabits = { ids ->
+                    val place = ids.withIndex().associate { (n, id) -> id to n }
+                    update(snapshot.copy(cards = snapshot.cards.map { c -> place[c.id]?.let { c.copy(listOrder = it) } ?: c }))
+                }
             ) else { val workspace = shown
             BoardScreen(
                 workspace = workspace,
@@ -653,8 +663,18 @@ internal fun DaymarkApp(
                 onAddColumn = { showColumnDialog = true },
                 onNewPage = { if (workspace == Workspace.NOTES) showFolderDialog = true else showPageDialog = true },
                 onMoveCard = { card, column ->
-                    update(snapshot.copy(cards = snapshot.cards.map { if (it.id == card.id) it.copy(columnId = column.id) else it }))
+                    // A task moved to another folder drops its hand-placed spot and lands at the top there.
+                    update(snapshot.copy(cards = snapshot.cards.map { if (it.id == card.id) it.copy(columnId = column.id, listOrder = null) else it }))
                     if (card.workspace == Workspace.TODOS) showMessage("Moved to ${column.name}")
+                },
+                onPlaceCards = { ids, movedId, column ->
+                    // A folder's tasks in their new hand-set order; a task dragged in from another folder also changes list.
+                    val place = ids.withIndex().associate { (i, id) -> id to i }
+                    update(snapshot.copy(cards = snapshot.cards.map { c ->
+                        val placed = place[c.id]?.let { c.copy(listOrder = it) } ?: c
+                        if (c.id == movedId && column != null) placed.copy(columnId = column.id) else placed
+                    }))
+                    if (movedId != null && column != null) showMessage("Moved to ${column.name}")
                 },
                 onToggleImportant = { card -> update(snapshot.copy(cards = snapshot.cards.map { if (it.id == card.id) it.copy(important = !it.important) else it })) },
                 onComplete = { card ->
@@ -892,13 +912,14 @@ internal fun DaymarkApp(
                 // A replaced or removed cover image is deleted with it.
                 if (draft.imagePath != null && editing.imagePath.isNotBlank() && draft.imagePath != editing.imagePath) runCatching { java.io.File(editing.imagePath).delete() }
                 update(snapshot.copy(cards = snapshot.cards.map {
-                    if (it.id == editing.id) it.copy(title = draft.title.trim(), details = draft.details.trim(), columnId = draft.columnId, important = draft.important, dueDay = draft.dueDay, dueMinute = draft.dueMinute,
+                    if (it.id == editing.id) it.copy(title = draft.title.trim(), details = draft.details.trim(), columnId = draft.columnId, listOrder = if (draft.columnId == it.columnId) it.listOrder else null, important = draft.important, dueDay = draft.dueDay, dueMinute = draft.dueMinute,
                         repeat = draft.repeat, repeatAnchor = if (draft.repeat.isBlank()) null else if (draft.dueDay != it.dueDay || draft.repeat != it.repeat) draft.dueDay else it.repeatAnchor,
-                        remind = draft.remind, remindLeadMinutes = draft.remindLeadMinutes, imagePath = draft.imagePath ?: it.imagePath, comment = draft.comment ?: it.comment) else it
+                        remind = draft.remind, remindLeadMinutes = draft.remindLeadMinutes, imagePath = draft.imagePath ?: it.imagePath, comment = draft.comment ?: it.comment,
+                        durationMinutes = draft.durationMinutes ?: it.durationMinutes) else it
                 }))
                 showComposer = false
                 editingCardId = null
-                showMessage(if (editing.workspace == Workspace.NOTES) "Note updated" else "Task updated")
+                showMessage(when { editing.workspace == Workspace.NOTES -> "Note updated"; editing.kind == CardKind.EVENT -> "Event updated"; else -> "Task updated" })
               } else {
                 // A note made while Private is open stays private.
                 val saved = cardFromDraft(workspace, draft, snapshot).let { if (workspace == Workspace.NOTES && privateOpen) it.copy(isPrivate = true) else it }
@@ -907,7 +928,7 @@ internal fun DaymarkApp(
                 pendingAppChoice = null
                 showMessage(when (workspace) {
                     Workspace.TODOS -> "Task added"
-                    Workspace.CALENDAR -> "Added to your calendar board"
+                    Workspace.CALENDAR -> "Added to your calendar"
                     Workspace.NOTES -> "Note saved"
                     Workspace.TRACK -> if (draft.kind == CardKind.HABIT) "Habit added" else "Tracker added"
                 })
@@ -948,6 +969,7 @@ private fun cardFromDraft(workspace: Workspace, draft: CardDraft, snapshot: Boar
         details = draft.details.trim(),
         dueDay = draft.dueDay,
         dueMinute = draft.dueMinute,
+        durationMinutes = draft.durationMinutes ?: 0,
         repeat = draft.repeat,
         repeatAnchor = if (draft.repeat.isBlank()) null else draft.dueDay,
         important = draft.important,

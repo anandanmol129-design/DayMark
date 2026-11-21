@@ -61,6 +61,7 @@ internal fun BoardScreen(
     onSelectView: (BoardView) -> Unit,
     onAddColumn: () -> Unit,
     onMoveCard: (BoardCard, BoardColumn) -> Unit,
+    onPlaceCards: (List<String>, String?, BoardColumn?) -> Unit = { _, _, _ -> },
     onToggleImportant: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
     onReopen: (BoardCard) -> Unit,
@@ -85,6 +86,7 @@ internal fun BoardScreen(
             onDelete = onDelete,
             onComplete = onComplete,
             onHabitCheckIn = onHabitCheckIn,
+            onEdit = onEditCard,
             jump = calendarJump
         )
         return
@@ -103,9 +105,9 @@ internal fun BoardScreen(
             onEditCard = onEditCard,
             onComplete = onComplete,
             onReopen = onReopen,
-            onToggleImportant = onToggleImportant,
             onMoveCard = onMoveCard,
             onDelete = onDelete,
+            onPlaceCards = onPlaceCards,
             onVoice = onVoice
         )
         return
@@ -128,6 +130,7 @@ internal fun BoardScreen(
             onDelete = onDelete,
             privateOpen = privateOpen,
             onTogglePrivate = onTogglePrivate,
+            onPlaceCards = onPlaceCards,
             onLockPrivate = onLockPrivate
         )
         return

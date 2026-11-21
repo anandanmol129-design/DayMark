@@ -177,6 +177,7 @@
                 android:resource="@xml/widget_habit_month_info" />
         </receiver>
         <receiver android:name=".ReminderReceiver" android:exported="false" />
+        <receiver android:name=".PinnedNotesReceiver" android:exported="false" />
         <receiver android:name=".ReminderSystemReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

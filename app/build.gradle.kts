@@ -13,8 +13,8 @@ android {
         applicationId = "com.anmol.daymark"
         minSdk = 31
         targetSdk = 35
-        versionCode = 31
-        versionName = "1.23.0"
+        versionCode = 32
+        versionName = "1.24.0"
     }
 
     buildTypes {
@@ -40,6 +40,7 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.5.0-alpha26")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     debugImplementation("androidx.compose.ui:ui-tooling:1.13.0-alpha01")
+    testImplementation("junit:junit:4.13.2")
 }
 
 /*

@@ -84,7 +84,9 @@ data class CardDraft(
     val remind: String = "",
     val remindLeadMinutes: Int = 0,
     val imagePath: String? = null, // a note's cover; null leaves it as it was
-    val comment: String? = null
+    val comment: String? = null,
+    /** An event's length; null leaves it as it was (everything but calendar items). */
+    val durationMinutes: Int? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -156,6 +158,20 @@ internal fun CardComposer(
     }
     var pickTime by remember { mutableStateOf(false) }
     var columnMenu by remember { mutableStateOf(false) }
+    // Calendar items: how long they last, set with the start on the time gears.
+    val isCalendar = workspace == Workspace.CALENDAR
+    var duration by rememberSaveable(workspace.id, editing?.id) { mutableStateOf(editing?.durationMinutes?.takeIf { it > 0 } ?: 60) }
+    var showTimes by remember { mutableStateOf(false) }
+    // Editing an event from the phone's calendar: say whether the edit reaches Google Calendar, and offer to open it there.
+    val reach by androidx.compose.runtime.produceState<CalendarSync.EditReach?>(null, editing?.id, isCalendar) {
+        value = if (editing == null || !isCalendar || editing.kind != CardKind.EVENT) null
+            else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { CalendarSync.editReach(context, editing) }
+    }
+    var pendingSave by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val calendarPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        pendingSave?.invoke()
+        pendingSave = null
+    }
 
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -179,10 +195,18 @@ internal fun CardComposer(
                 savedKind == CardKind.TASK || savedKind == CardKind.EVENT -> if (day != null) remind else ""
                 else -> ""
             }
-            onSave(CardDraft(title, details, savedKind, columnId, day, important, selectedApp, deepLink, minute, repeat, reminder, if (savedKind == CardKind.HABIT) 0 else remindLead))
+            val draft = CardDraft(title, details, savedKind, columnId, day, important, selectedApp, deepLink, minute, repeat, reminder, if (savedKind == CardKind.HABIT) 0 else remindLead,
+                durationMinutes = if (isCalendar) (if (minute != null) duration else 0) else null)
+            // Writing to the phone's calendar needs its permission first, or the edit would stay in Daymark only.
+            if (reach == CalendarSync.EditReach.NEEDS_PERMISSION) {
+                pendingSave = { onSave(draft) }
+                calendarPermission.launch(arrayOf(android.Manifest.permission.READ_CALENDAR, android.Manifest.permission.WRITE_CALENDAR))
+            } else onSave(draft)
         }
     }
     LaunchedEffect(Unit) {
+        // An event opened from the calendar shows its times first; the keyboard comes up when the title is tapped.
+        if (editing != null && isCalendar) return@LaunchedEffect
         runCatching { focus.requestFocus() }
         keyboard?.show()
     }
@@ -197,6 +221,7 @@ internal fun CardComposer(
     ) {
         Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 22.dp, bottom = 12.dp)) {
+                if (editing != null && isCalendar) EventSyncLine(editing, reach)
                 SheetField(
                     value = title,
                     onValueChange = { title = it },
@@ -246,9 +271,14 @@ internal fun CardComposer(
                 if (workspace != Workspace.TRACK) {
                     Spacer(Modifier.height(14.dp))
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (workspace == Workspace.TODOS || workspace == Workspace.CALENDAR) {
+                        if (workspace == Workspace.TODOS) {
                             val scheduled = listOfNotNull(dueDay?.let(::formatDue), dueMinute?.let(::formatClock)).joinToString(" · ")
                             SheetChip(if (scheduled.isEmpty()) "Schedule" else scheduled, if (scheduled.isEmpty()) TodoText else TodoBlue, ZenIcon.Calendar) { showSchedule = true }
+                        }
+                        if (isCalendar) {
+                            SheetChip(dueDay?.let(::formatDue) ?: "Date", if (dueDay == null) TodoText else TodoBlue, ZenIcon.Calendar) { showSchedule = true }
+                            val start = dueMinute
+                            SheetChip(if (start == null) "All day" else "${formatClock(start)} – ${formatClock((start + duration) % (24 * 60))}", if (start == null) TodoText else TodoBlue, ZenIcon.Clock) { showTimes = true }
                         }
                         if ((workspace == Workspace.TODOS || workspace == Workspace.CALENDAR) && editing?.calendarSourceId.isNullOrBlank()) Box {
                             SheetChip(if (repeat.isBlank()) "Repeat" else Repeat.fromId(repeat).label, if (repeat.isBlank()) TodoText else TodoBlue, ZenIcon.Repeat) { repeatMenu = true }
@@ -269,6 +299,7 @@ internal fun CardComposer(
                         if (workspace == Workspace.TODOS) SheetChip("Voice", TodoText, ZenIcon.Mic, onVoice)
                         SheetChip("Important", if (important) Amber else TodoText, if (important) ZenIcon.StarFilled else ZenIcon.Star) { important = !important }
                     }
+                    if (isCalendar && dueMinute != null) Text("Lasts ${formatSpan(duration)}", color = TodoMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                     if (remind.isNotBlank() && (workspace == Workspace.TODOS || workspace == Workspace.CALENDAR)) {
                         if (notificationsBlocked) RemindWarning()
                         else if (dueDay != null && dueMinute == null && parseTimeFromTitle(title) == null) Text("No time set, so it reminds at ${formatClock(DEFAULT_REMINDER_MINUTE)}", color = TodoMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
@@ -314,6 +345,7 @@ internal fun CardComposer(
         SchedulePicker(
             initialDay = dueDay,
             initialMinute = dueMinute,
+            showTime = !isCalendar,
             onDismiss = { showSchedule = false },
             onDone = { day, minute ->
                 dueDay = day
@@ -323,6 +355,35 @@ internal fun CardComposer(
                 showSchedule = false
             }
         )
+    }
+    if (showTimes) {
+        EventTimeSheet(dueMinute, duration, onDismiss = { showTimes = false }, onDone = { start, length ->
+            dueMinute = start
+            if (start != null) duration = length
+            if (dueDay == null) dueDay = LocalDate.now().toEpochDay()
+            showTimes = false
+        })
+    }
+}
+
+/** At the top of an event being edited: where the edit goes, and a way to open the event in the calendar app. */
+@Composable
+private fun EventSyncLine(event: BoardCard, reach: CalendarSync.EditReach?) {
+    val context = LocalContext.current
+    val linked = CalendarSync.phoneEvent(event) != null
+    val (text, color) = when (reach) {
+        CalendarSync.EditReach.SYNCS -> "Changes sync to Google Calendar" to TodoBlue
+        CalendarSync.EditReach.NEEDS_PERMISSION -> "Saving asks for calendar access, to sync the change" to Amber
+        CalendarSync.EditReach.REPEATING -> "Repeating event: changes stay in Daymark. Edit the series in Google Calendar" to Amber
+        CalendarSync.EditReach.READ_ONLY -> "Read-only calendar: changes stay in Daymark" to Amber
+        CalendarSync.EditReach.DAYMARK_ONLY -> "Only in Daymark. Choose a sync calendar in Settings › Calendar" to TodoMuted
+        null -> "" to TodoMuted
+    }
+    Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, color = color, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.weight(1f).padding(end = 8.dp))
+        if (linked) SheetChip("Open in Calendar", TodoText, ZenIcon.ArrowUpRight) {
+            if (!CalendarSync.openInCalendarApp(context, event)) android.widget.Toast.makeText(context, "No calendar app could open this event", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 }
 
@@ -340,7 +401,7 @@ internal fun calendarColumnFor(columns: List<BoardColumn>, day: Long, current: S
 /** Date and time in one sheet: quick picks, a month grid, then an optional time. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SchedulePicker(initialDay: Long?, initialMinute: Int?, onDismiss: () -> Unit, onDone: (Long?, Int?) -> Unit) {
+private fun SchedulePicker(initialDay: Long?, initialMinute: Int?, showTime: Boolean = true, onDismiss: () -> Unit, onDone: (Long?, Int?) -> Unit) {
     val context = LocalContext.current
     val today = LocalDate.now()
     var day by remember { mutableStateOf(initialDay) }
@@ -419,11 +480,13 @@ private fun SchedulePicker(initialDay: Long?, initialMinute: Int?, onDismiss: ()
                     }
                 }
             }
+            if (showTime) {
             HorizontalDivider(color = TodoBorder, modifier = Modifier.padding(top = 8.dp))
             Row(Modifier.fillMaxWidth().clickable { pickTime = true }.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Glyph(ZenIcon.Clock, if (minute != null) TodoBlue else TodoMuted, 20.dp, modifier = Modifier.padding(end = 20.dp))
                 Text(minute?.let(::formatClock) ?: "Time", color = TodoText, fontSize = 18.sp, modifier = Modifier.weight(1f))
                 if (minute != null) Glyph(ZenIcon.Close, TodoMuted, 24.dp, modifier = Modifier.clickable { minute = null }.padding(horizontal = 8.dp))
+            }
             }
             Spacer(Modifier.height(12.dp))
         }

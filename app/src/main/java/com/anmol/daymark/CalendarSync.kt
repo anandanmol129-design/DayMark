@@ -133,6 +133,50 @@ internal object CalendarSync {
     fun includeTodos(context: Context) = prefs(context).getBoolean("todos", false)
     fun setIncludeTodos(context: Context, on: Boolean) { prefs(context).edit().putBoolean("todos", on).apply(); schedulePush(context, 0) }
 
+    // ---- Editing one event ------------------------------------------------------------------------------------------
+
+    /** Where an edit made in Daymark's event editor ends up, for the editor to say so. */
+    enum class EditReach { SYNCS, NEEDS_PERMISSION, REPEATING, READ_ONLY, DAYMARK_ONLY }
+
+    /** The phone event behind [card] (its id, and for an imported occurrence its start), or null if there is none yet. */
+    fun phoneEvent(card: BoardCard): Pair<Long, Long?>? {
+        card.calendarSourceId.takeIf { it.isNotBlank() }?.let { source ->
+            source.substringBefore(':').toLongOrNull()?.let { return it to source.substringAfter(':', "").toLongOrNull() }
+        }
+        return card.providerEventId?.takeIf { it > 0 }?.let { it to null }
+    }
+
+    /**
+     * Whether saving [card] in the editor will be written to the phone's calendar (and so to Google by its sync
+     * adapter): imported single events on a calendar we may edit, and Daymark's own events once a sync calendar is
+     * chosen. Repeating imported events and read-only calendars keep the edit in Daymark. Call off the main thread.
+     */
+    fun editReach(context: Context, card: BoardCard): EditReach {
+        if (card.calendarSourceId.isBlank()) {
+            val pushes = (card.providerEventId ?: 0) > 0 || target(context) != OFF
+            return if (!pushes) EditReach.DAYMARK_ONLY else if (canWrite(context)) EditReach.SYNCS else EditReach.NEEDS_PERMISSION
+        }
+        if (!canRead(context) || !canWrite(context)) return EditReach.NEEDS_PERMISSION
+        val eventId = phoneEvent(card)?.first ?: return EditReach.READ_ONLY
+        val row = runCatching { events(context, listOf(eventId))[eventId] }.getOrNull() ?: return EditReach.READ_ONLY
+        if (row.deleted) return EditReach.READ_ONLY
+        if (row.recurring) return EditReach.REPEATING
+        val writable = calendars(context)?.firstOrNull { it.id == row.calendarId }?.writable == true
+        return if (writable && row.editableByUs) EditReach.SYNCS else EditReach.READ_ONLY
+    }
+
+    /** Opens [card]'s phone event in the calendar app (Google Calendar on most phones); false if it has none or nothing opens it. */
+    fun openInCalendarApp(context: Context, card: BoardCard): Boolean {
+        val (eventId, begin) = phoneEvent(card) ?: return false
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, ContentUris.withAppendedId(Events.CONTENT_URI, eventId))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (begin != null) {
+            intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+            if (card.durationMinutes > 0) intent.putExtra(CalendarContract.EXTRA_EVENT_END_TIME, begin + card.durationMinutes * 60_000L)
+        }
+        return runCatching { context.startActivity(intent) }.isSuccess
+    }
+
     // ---- Calendars --------------------------------------------------------------------------------------------------
 
     /** The phone's calendars, or null when they can't be read (no permission, provider error). Call off the main thread. */

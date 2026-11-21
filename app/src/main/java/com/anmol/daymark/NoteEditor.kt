@@ -61,7 +61,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,24 +70,15 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.input.TransformedText
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -117,7 +107,8 @@ internal fun NoteEditorSheet(
     val isSave = editing != null && (columns.firstOrNull { it.id == editing.columnId }?.pageId == DEFAULT_SAVED_PAGE_ID || editing.comment.isNotBlank())
     var columnId by rememberSaveable(editing?.id, initialColumnId) { mutableStateOf(initialColumnId.ifBlank { columns.firstOrNull()?.id.orEmpty() }) }
     val blocks = remember(editing?.id) { mutableStateListOf<NoteBlock>().apply { addAll(NoteBlocks.withTrailingText(NoteBlocks.parse(source))) } }
-    val values = remember(editing?.id) { mutableStateMapOf<Long, TextFieldValue>() }
+    // Each run of text lines is one field (see NoteRuns); its value is kept by the run's position among the runs.
+    val values = remember(editing?.id) { mutableStateMapOf<Int, TextFieldValue>() }
     var focusTarget by remember { mutableStateOf<BlockFocus?>(null) }
     var currentId by remember { mutableStateOf<Long?>(null) }
     var showDoodle by remember { mutableStateOf(false) }
@@ -127,6 +118,7 @@ internal fun NoteEditorSheet(
     // The choice is remembered: once on, existing notes open in it. New notes always open ready to write.
     var reading by rememberSaveable(editing?.id) { mutableStateOf(editing != null && NoteReader.enabled(context)) }
     var attaching by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -138,17 +130,42 @@ internal fun NoteEditorSheet(
     var look by remember { mutableStateOf(NoteReader.look(context)) }
     fun setLook(next: ReaderLook) { look = next; NoteReader.setLook(context, next) }
 
-    fun valueOf(block: NoteBlock) = values[block.id]?.takeIf { it.text == block.text } ?: TextFieldValue(block.text, TextRange(block.text.length))
-    fun commit(next: List<NoteBlock>) {
+    fun valueOf(ordinal: Int, run: IntRange): TextFieldValue {
+        val text = NoteRuns.text(blocks.subList(run.first, run.last + 1))
+        return values[ordinal]?.takeIf { it.text == text } ?: TextFieldValue(text, TextRange(text.length))
+    }
+    // Undo and redo keep whole-note snapshots; a burst of typing (no pause over a second) is one step.
+    val undoStack = remember(editing?.id) { mutableStateListOf<String>() }
+    val redoStack = remember(editing?.id) { mutableStateListOf<String>() }
+    var lastEditAt by remember { mutableStateOf(0L) }
+    fun commit(next: List<NoteBlock>, record: Boolean = true) {
         val list = NoteBlocks.withTrailingText(next)
+        val before = NoteBlocks.serialize(blocks)
         blocks.clear(); blocks.addAll(list)
-        values.keys.retainAll(list.map { it.id }.toSet())
+        values.keys.retainAll(NoteRuns.runs(list).indices.toSet())
         source = NoteBlocks.serialize(list)
+        if (record && source != before) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastEditAt > 1000 || undoStack.isEmpty()) {
+                undoStack.add(before)
+                if (undoStack.size > 200) undoStack.removeAt(0)
+            }
+            lastEditAt = now
+            redoStack.clear()
+        }
+    }
+    /** Puts the cursor in block [target.id] at [target.cursor], focusing the run it is in. */
+    fun focusOn(target: BlockFocus) {
+        val (ordinal, start) = NoteRuns.locate(blocks, target.id) ?: return
+        val run = NoteRuns.runs(blocks)[ordinal]
+        val block = blocks.first { it.id == target.id }
+        values[ordinal] = TextFieldValue(NoteRuns.text(blocks.subList(run.first, run.last + 1)), TextRange(start + target.cursor.coerceIn(0, block.text.length)))
+        currentId = target.id
+        focusTarget = target
     }
     fun apply(edit: BlockEdit) {
-        edit.focus?.let { focus -> edit.blocks.firstOrNull { it.id == focus.id }?.let { values[focus.id] = TextFieldValue(it.text, TextRange(focus.cursor.coerceIn(0, it.text.length))) } }
         commit(edit.blocks)
-        focusTarget = edit.focus
+        edit.focus?.let(::focusOn)
     }
     fun indexOf(id: Long?) = blocks.indexOfFirst { it.id == id }.takeIf { it >= 0 }
     fun toggleCheck(block: NoteBlock) {
@@ -158,11 +175,33 @@ internal fun NoteEditorSheet(
             commit(blocks.toList())
         }
     }
+    fun restore(from: MutableList<String>, to: MutableList<String>) {
+        val snapshot = from.removeLastOrNull() ?: return
+        to.add(NoteBlocks.serialize(blocks))
+        values.clear()
+        commit(NoteBlocks.parse(snapshot), record = false)
+        lastEditAt = 0L
+        blocks.lastOrNull { it.kind.isText }?.let { focusOn(BlockFocus(it.id, it.text.length)) }
+    }
+    fun undo() = restore(undoStack, redoStack)
+    fun redo() = restore(redoStack, undoStack)
+    fun heading(level: Int) {
+        val index = indexOf(currentId) ?: return
+        val runs = NoteRuns.runs(blocks)
+        val ordinal = runs.indexOfFirst { index in it }
+        if (ordinal < 0) return
+        val selection = valueOf(ordinal, runs[ordinal]).selection
+        commit(NoteRuns.heading(blocks, runs[ordinal], selection.min, selection.max, level))
+    }
     fun insert(block: NoteBlock) = apply(NoteBlocks.insertAfter(blocks, indexOf(currentId), block))
     fun toggle(kind: BlockKind) {
         val index = indexOf(currentId) ?: return
-        blocks[index] = NoteBlocks.toggle(blocks[index], kind)
-        commit(blocks.toList())
+        val runs = NoteRuns.runs(blocks)
+        val ordinal = runs.indexOfFirst { index in it }
+        if (ordinal < 0) return
+        // Every line the selection touches changes together; the words stay as they are, so the selection does too.
+        val selection = valueOf(ordinal, runs[ordinal]).selection
+        commit(NoteRuns.toggle(blocks, runs[ordinal], selection.min, selection.max, kind))
     }
     fun finish() {
         val details = NoteBlocks.serialize(blocks).trim()
@@ -174,26 +213,18 @@ internal fun NoteEditorSheet(
         }
     }
 
-    // A picked image goes through the crop page first; it hands back a stored path just like a plain copy.
+    // A picked cover goes through the crop page first; it hands back a stored path just like a plain copy.
     var cropUri by rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
-    var cropForCover by rememberSaveable { mutableStateOf(false) }
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) { cropForCover = false; cropUri = uri }
-    }
-
     val pickCover = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) { cropForCover = true; cropUri = uri }
+        if (uri != null) cropUri = uri
     }
-    fun usePicked(path: String) {
-        if (cropForCover) {
-            // A cover picked and then swapped before saving is never stored, so drop it straight away.
-            if (cover.isNotBlank() && cover != editing?.imagePath) runCatching { java.io.File(cover).delete() }
-            cover = path
-        } else insert(NoteBlock(NoteBlocks.newId(), BlockKind.IMAGE, path))
+    fun useCover(path: String) {
+        // A cover picked and then swapped before saving is never stored, so drop it straight away.
+        if (cover.isNotBlank() && cover != editing?.imagePath) runCatching { java.io.File(cover).delete() }
+        cover = path
     }
     // Any kind of file: copied into the app on a background thread, then shown as a picture or a file card.
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    fun attach(uri: android.net.Uri) {
         attaching = true
         scope.launch {
             val file = withContext(Dispatchers.IO) { Attachments.copy(context, uri) }
@@ -204,6 +235,22 @@ internal fun NoteEditorSheet(
                 else -> insert(NoteBlock(NoteBlocks.newId(), BlockKind.FILE, file.name, file.path))
             }
         }
+    }
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) attach(uri) }
+    // Pictures and videos come through Android's own photo picker; a photo can also be taken there and then.
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) attach(uri) }
+    var cameraUri by rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
+    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val uri = cameraUri
+        cameraUri = null
+        if (ok && uri != null) attach(uri)
+    }
+    fun openCamera() {
+        val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+        val file = java.io.File(dir, "Photo ${java.text.SimpleDateFormat("yyyy-MM-dd HHmmss", java.util.Locale.US).format(java.util.Date())}.jpg")
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        cameraUri = uri
+        runCatching { takePhoto.launch(uri) }.onFailure { cameraUri = null; android.widget.Toast.makeText(context, "No camera app found", android.widget.Toast.LENGTH_SHORT).show() }
     }
     fun chooseCover() = pickCover.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
 
@@ -255,7 +302,7 @@ internal fun NoteEditorSheet(
                         // Enter in the title moves on to the body instead of making a two-line title.
                         if ('\n' in typed) {
                             title = typed.replace("\n", "")
-                            blocks.firstOrNull { it.kind.isText }?.let { focusTarget = BlockFocus(it.id, 0) }
+                            blocks.firstOrNull { it.kind.isText }?.let { focusOn(BlockFocus(it.id, 0)) }
                         } else title = typed
                     },
                     textStyle = TextStyle(color = TodoText, fontSize = 25.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
@@ -279,59 +326,54 @@ internal fun NoteEditorSheet(
                         blocks.forEach { block -> key(block.id) { ReaderBlock(block, look) { toggleCheck(block) } } }
                         if (isSave && comment.isNotBlank()) ReaderComment(comment, look)
                     }
-                } else blocks.forEachIndexed { index, block ->
-                    key(block.id) {
-                        when (block.kind) {
-                            BlockKind.FILE -> AttachmentChip(block.text, block.prefix, Modifier.padding(vertical = 6.dp), onRemove = { commit(blocks.filterNot { it.id == block.id }) })
-                            BlockKind.IMAGE -> ImageBlock(block.text) { commit(blocks.filterNot { it.id == block.id }) }
-                            BlockKind.DIVIDER -> DividerBlock { commit(blocks.filterNot { it.id == block.id }) }
-                            BlockKind.TABLE -> TableBlock(
-                                block,
-                                onFocused = { currentId = block.id },
-                                onChange = { rows -> blocks.indexOfFirst { it.id == block.id }.takeIf { it >= 0 }?.let { i -> blocks[i] = block.copy(rows = rows, raw = null); commit(blocks.toList()) } },
-                                onDelete = { commit(blocks.filterNot { it.id == block.id }) }
-                            )
-                            else -> TextBlock(
-                                block = block,
-                                value = valueOf(block),
-                                hint = when {
-                                    block.kind == BlockKind.HEADING -> "Heading"
-                                    blocks.size == 1 -> "Start writing…"
-                                    else -> null
-                                },
-                                focusTarget = focusTarget,
-                                onFocusHandled = { focusTarget = null },
-                                onFocused = { currentId = block.id },
-                                onToggleCheck = { toggleCheck(block) },
-                                onBackspaceAtStart = { NoteBlocks.backspaceAtStart(blocks, blocks.indexOfFirst { it.id == block.id })?.let(::apply) },
-                                onValueChange = { typed ->
-                                    val i = blocks.indexOfFirst { it.id == block.id }
-                                    val newlines = typed.text.count { it == '\n' }
-                                    when {
-                                        i < 0 -> Unit
-                                        newlines == 1 && typed.text.length == valueOf(block).text.length + 1 -> {
-                                            // Enter: split here, carrying a list on to the next line.
-                                            val at = typed.text.indexOf('\n')
-                                            val joined = blocks.toMutableList().also { it[i] = block.copy(text = typed.text.removeRange(at, at + 1)) }
-                                            apply(NoteBlocks.enter(joined, i, at))
-                                        }
-                                        newlines > 0 -> apply(NoteBlocks.paste(blocks, i, typed.text, typed.selection.start))
-                                        else -> {
-                                            val updated = NoteBlocks.withText(block, typed.text)
-                                            val converted = NoteBlocks.shortcut(updated)
-                                            if (converted.kind != updated.kind) {
-                                                val cursor = (typed.selection.start - (typed.text.length - converted.text.length)).coerceIn(0, converted.text.length)
-                                                values[block.id] = TextFieldValue(converted.text, TextRange(cursor))
-                                                blocks[i] = converted
-                                            } else {
-                                                values[block.id] = typed
-                                                blocks[i] = updated
+                } else {
+                    var ordinal = 0
+                    NoteRuns.group(blocks).forEach { range ->
+                        val block = blocks[range.first]
+                        if (block.kind.isText) {
+                            val run = ordinal++
+                            key("run", run) {
+                                NoteTextRun(
+                                    lines = blocks.subList(range.first, range.last + 1).toList(),
+                                    value = valueOf(run, range),
+                                    hint = if (blocks.size == 1) "Start writing…" else null,
+                                    focusTarget = focusTarget,
+                                    onFocusHandled = { focusTarget = null },
+                                    onFocused = { NoteRuns.runs(blocks).getOrNull(run)?.let { currentId = NoteRuns.blockAt(blocks, it, valueOf(run, it).selection.start).id } },
+                                    onToggleCheck = ::toggleCheck,
+                                    onBackspaceAtStart = {
+                                        NoteRuns.runs(blocks).getOrNull(run)?.let { NoteBlocks.backspaceAtStart(blocks, it.first)?.let(::apply) }
+                                    },
+                                    onValueChange = { typed ->
+                                        // Read the run afresh: several changes can arrive before the next recomposition.
+                                        val now = NoteRuns.runs(blocks).getOrNull(run)
+                                        val result = now?.let { NoteRuns.edit(blocks, it, typed.text, typed.selection.start) }
+                                        when {
+                                            now == null -> Unit
+                                            result == null -> { values[run] = typed; currentId = NoteRuns.blockAt(blocks, now, typed.selection.start).id }
+                                            else -> {
+                                                commit(result.blocks)
+                                                if (result.exact) {
+                                                    values[run] = typed
+                                                    currentId = result.focus?.id
+                                                } else result.focus?.let(::focusOn)
                                             }
-                                            source = NoteBlocks.serialize(blocks)
                                         }
                                     }
-                                }
-                            )
+                                )
+                            }
+                        } else key(block.id) {
+                            when (block.kind) {
+                                BlockKind.FILE -> AttachmentChip(block.text, block.prefix, Modifier.padding(vertical = 6.dp), onRemove = { commit(blocks.filterNot { it.id == block.id }) })
+                                BlockKind.IMAGE -> ImageBlock(block.text) { commit(blocks.filterNot { it.id == block.id }) }
+                                BlockKind.DIVIDER -> DividerBlock { commit(blocks.filterNot { it.id == block.id }) }
+                                else -> TableBlock(
+                                    block,
+                                    onFocused = { currentId = block.id },
+                                    onChange = { rows -> blocks.indexOfFirst { it.id == block.id }.takeIf { it >= 0 }?.let { i -> blocks[i] = block.copy(rows = rows, raw = null); commit(blocks.toList()) } },
+                                    onDelete = { commit(blocks.filterNot { it.id == block.id }) }
+                                )
+                            }
                         }
                     }
                 }
@@ -341,14 +383,16 @@ internal fun NoteEditorSheet(
                     // The empty space under the note puts the cursor at the end of the last line.
                     Spacer(
                         Modifier.fillMaxWidth().height(220.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                            blocks.lastOrNull { it.kind.isText }?.let { focusTarget = BlockFocus(it.id, it.text.length) }
+                            blocks.lastOrNull { it.kind.isText }?.let { focusOn(BlockFocus(it.id, it.text.length)) }
                         }
                     )
                 }
             }
             // Cover, reader mode and Done float at the bottom right, like search and voice on the main screens.
             Column(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                EditorRoundButton(ZenIcon.Share, "Share note") { sharing = true }
                 if (cover.isEmpty() && !reading) EditorRoundButton(ZenIcon.Picture, "Add cover", onClick = ::chooseCover)
+                if (editing != null && !editing.isPrivate) PinNoteButton(editing.id)
                 EditorRoundButton(ZenIcon.Book, if (reading) "Edit note" else "Reader mode", active = reading) { setReading(!reading) }
                 EditorRoundButton(ZenIcon.Check, "Done", filled = true, onClick = ::finish)
             }
@@ -356,23 +400,43 @@ internal fun NoteEditorSheet(
             if (attaching) Text("Adding file…", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
             if (reading) ReaderBar(look, ::setLook)
             else {
-            val current = blocks.firstOrNull { it.id == currentId }?.kind
+            val currentBlock = blocks.firstOrNull { it.id == currentId }
+            val current = currentBlock?.kind
+            val level = if (current == BlockKind.HEADING) currentBlock.level else 0
             NoteToolbar(
-                actions = listOf(
-                    "H" to { toggle(BlockKind.HEADING) },
-                    "•" to { toggle(BlockKind.BULLET) },
-                    "☐" to { toggle(BlockKind.CHECK) },
-                    "1." to { toggle(BlockKind.NUMBERED) },
-                    "❝" to { toggle(BlockKind.QUOTE) },
-                    "🖼" to { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                    "―" to { insert(NoteBlock(NoteBlocks.newId(), BlockKind.DIVIDER)) },
-                    "▦" to { insert(NoteBlock(NoteBlocks.newId(), BlockKind.TABLE, rows = listOf(listOf("", ""), listOf("", "")))) },
-                    "✎" to { showDoodle = true },
-                    "📎" to { if (!attaching) pickFile.launch(arrayOf("*/*")) }
-                ),
-                active = setOfNotNull(when (current) {
-                    BlockKind.HEADING -> "H"; BlockKind.BULLET -> "•"; BlockKind.CHECK -> "☐"; BlockKind.NUMBERED -> "1."; BlockKind.QUOTE -> "❝"; else -> null
-                })
+                listOf(
+                    ToolSlot.Group(
+                        ToolAction("Headings", text = "H"),
+                        listOf(
+                            ToolAction("Title", text = "H1", active = level == 1) { heading(1) },
+                            ToolAction("Heading", text = "H2", active = level == 2) { heading(2) },
+                            ToolAction("Small", text = "H3", active = level == 3) { heading(3) },
+                            ToolAction("Text", text = "Aa") { heading(0) }
+                        )
+                    ),
+                    ToolSlot.Group(
+                        ToolAction("Lists", icon = ZenIcon.Lines),
+                        listOf(
+                            ToolAction("Bullets", icon = ZenIcon.Lines, active = current == BlockKind.BULLET) { toggle(BlockKind.BULLET) },
+                            ToolAction("Checklist", icon = ZenIcon.Checkbox, active = current == BlockKind.CHECK) { toggle(BlockKind.CHECK) },
+                            ToolAction("Numbered", text = "1.", active = current == BlockKind.NUMBERED) { toggle(BlockKind.NUMBERED) }
+                        )
+                    ),
+                    ToolSlot.Single(ToolAction("Quote", icon = ZenIcon.Quote, active = current == BlockKind.QUOTE) { toggle(BlockKind.QUOTE) }),
+                    ToolSlot.Single(ToolAction("Divider", icon = ZenIcon.Minus) { insert(NoteBlock(NoteBlocks.newId(), BlockKind.DIVIDER)) }),
+                    ToolSlot.Single(ToolAction("Table", icon = ZenIcon.Table) { insert(NoteBlock(NoteBlocks.newId(), BlockKind.TABLE, rows = listOf(listOf("", ""), listOf("", "")))) }),
+                    ToolSlot.Group(
+                        ToolAction("Add", icon = ZenIcon.Paperclip, enabled = !attaching),
+                        listOf(
+                            ToolAction("Photo", icon = ZenIcon.Picture) { pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
+                            ToolAction("Camera", icon = ZenIcon.Camera, onClick = ::openCamera),
+                            ToolAction("File", icon = ZenIcon.File) { pickFile.launch(arrayOf("*/*")) },
+                            ToolAction("Doodle", icon = ZenIcon.Pencil) { showDoodle = true }
+                        )
+                    ),
+                    ToolSlot.Single(ToolAction("Undo", icon = ZenIcon.Undo, enabled = undoStack.isNotEmpty(), onClick = ::undo)),
+                    ToolSlot.Single(ToolAction("Redo", icon = ZenIcon.Redo, enabled = redoStack.isNotEmpty(), onClick = ::redo))
+                )
             )
             }
         }
@@ -380,66 +444,20 @@ internal fun NoteEditorSheet(
     cropUri?.let { uri ->
         ImageCropDialog(
             uri = uri,
-            defaultAspect = if (cropForCover) CropAspect.Wide else CropAspect.Free,
+            defaultAspect = CropAspect.Wide,
             onCancel = { cropUri = null },
-            onResult = { path -> cropUri = null; usePicked(path) }
+            onResult = { path -> cropUri = null; useCover(path) }
         )
     }
+    // Shares the note as it stands now, saved or not.
+    if (sharing) NoteShareSheet(
+        (editing ?: BoardCard(workspace = Workspace.NOTES, columnId = columnId, kind = CardKind.NOTE, title = ""))
+            .copy(title = title.trim(), details = NoteBlocks.serialize(blocks).trim(), imagePath = cover, comment = comment.trim())
+    ) { sharing = false }
     if (showDoodle) {
         DoodleDialog(
             onDismiss = { showDoodle = false },
             onSaved = { path -> insert(NoteBlock(NoteBlocks.newId(), BlockKind.IMAGE, path)); showDoodle = false }
-        )
-    }
-}
-
-/** Keeps every character (so the cursor lands where you tap) and only styles bold/italic/code/links, dimming their markers. */
-private class InlineMarkdown(private val base: Color) : VisualTransformation {
-    override fun filter(text: AnnotatedString) = TransformedText(Markdown.styledForEditing(text.text, base), OffsetMapping.Identity)
-    override fun equals(other: Any?) = other is InlineMarkdown && other.base == base
-    override fun hashCode() = base.hashCode()
-}
-
-@Composable
-private fun TextBlock(
-    block: NoteBlock,
-    value: TextFieldValue,
-    hint: String?,
-    focusTarget: BlockFocus?,
-    onFocusHandled: () -> Unit,
-    onFocused: () -> Unit,
-    onToggleCheck: () -> Unit,
-    onBackspaceAtStart: () -> Unit,
-    onValueChange: (TextFieldValue) -> Unit
-) {
-    val requester = remember { FocusRequester() }
-    val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(focusTarget) {
-        if (focusTarget?.id == block.id) {
-            runCatching { requester.requestFocus() }
-            onFocusHandled()
-            // When the line that had focus was just merged away, the keyboard would otherwise drop.
-            keyboard?.show()
-            withFrameNanos { }
-            keyboard?.show()
-        }
-    }
-    val style = noteTextStyle(block)
-    val transformation = remember(style.color) { InlineMarkdown(style.color) }
-    BlockLine(block, style, onToggleCheck) {
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = style,
-            cursorBrush = SolidColor(TodoBlue),
-            visualTransformation = transformation,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            modifier = Modifier.weight(1f).focusRequester(requester)
-                .onFocusChanged { if (it.isFocused) onFocused() }
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace && value.selection.collapsed && value.selection.start == 0) { onBackspaceAtStart(); true } else false
-                },
-            decorationBox = { field -> Box { if (value.text.isEmpty() && hint != null) Text(hint, style = style.copy(color = TodoMuted.copy(alpha = .55f), textDecoration = null)); field() } }
         )
     }
 }
@@ -456,7 +474,7 @@ private fun EditorRoundButton(icon: ZenIcon, description: String, filled: Boolea
 }
 
 /** How a text block's words look, the same while writing and while reading. */
-private fun noteTextStyle(block: NoteBlock): TextStyle {
+internal fun noteTextStyle(block: NoteBlock): TextStyle {
     val (size, line) = when (block.kind) {
         BlockKind.HEADING -> when (block.level) { 1 -> 26.sp to 33.sp; 2 -> 22.sp to 29.sp; else -> 19.sp to 26.sp }
         else -> 17.sp to 25.sp

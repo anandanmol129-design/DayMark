@@ -1,9 +1,20 @@
 package com.anmol.daymark
 
-import android.app.DatePickerDialog as PlatformDatePickerDialog
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.flow.drop
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.input.pointer.pointerInput
@@ -118,6 +129,19 @@ private fun buildTimeline(timed: List<DayEntry>, nowMinute: Int?): List<Timeline
     return rows
 }
 
+/** What the calendar page is showing, so the + button can add an event on that day. */
+internal object CalendarUi {
+    var shownDay by mutableStateOf<Long?>(null)
+}
+
+/** Weeks either side of this one that the week strip can be swiped to. */
+private const val WEEK_PAGES = 4000
+private const val WEEK_HOME = WEEK_PAGES / 2
+
+/** The Sunday that starts [day]'s week. */
+private fun weekStartOf(day: Long): Long = day - (LocalDate.ofEpochDay(day).dayOfWeek.value % 7)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CalendarScreen(
     cards: List<BoardCard>,
@@ -125,11 +149,10 @@ internal fun CalendarScreen(
     onDelete: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
     onHabitCheckIn: (BoardCard) -> Unit,
+    onEdit: (BoardCard) -> Unit = {},
     jump: Pair<Long, Int>? = null
 ) {
-    val context = LocalContext.current
     var selectedDay by rememberSaveable { mutableStateOf(jump?.first ?: LocalDate.now().toEpochDay()) }
-    // A day picked on the calendar widget (the counter lets the same day be requested twice).
     var pickDate by remember { mutableStateOf(false) }
     var nowTick by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -138,9 +161,10 @@ internal fun CalendarScreen(
             nowTick = System.currentTimeMillis()
         }
     }
+    SideEffect { CalendarUi.shownDay = selectedDay }
     val today = LocalDate.now().toEpochDay()
     val selectedDate = LocalDate.ofEpochDay(selectedDay)
-    val weekStart = selectedDate.minusDays((selectedDate.dayOfWeek.value % 7).toLong())
+    val haptics = LocalHapticFeedback.current
 
     val columnsMode = Layouts.columns(Layouts.CALENDAR)
     // List mode: one long scroll of days, each day's things in a card. The strip above follows the day at the top.
@@ -160,67 +184,58 @@ internal fun CalendarScreen(
     }
     LaunchedEffect(jump) { jump?.let { go(it.first) } }
 
-    var drag by remember { mutableStateOf(0f) }
-    val tabSwipe = LocalTabSwipe.current
+    // The week strip is a row of pages, one week each: swipe it to change week. Sideways swipes anywhere else on
+    // the page fall through to the tabs (see swipeBetweenTabs), so the two never fight over a drag.
+    val homeWeek = remember { weekStartOf(today) }
+    fun pageOf(day: Long) = (WEEK_HOME + Math.floorDiv(weekStartOf(day) - homeWeek, 7L).toInt()).coerceIn(0, WEEK_PAGES - 1)
+    val weeks = rememberPagerState(initialPage = pageOf(selectedDay)) { WEEK_PAGES }
     val latestDay = androidx.compose.runtime.rememberUpdatedState(selectedDay)
-    // Swipe anywhere on the page to move a day back or forward within the week in the strip; past
-    // Saturday or Sunday the swipe moves on to the next or previous tab (the arrows cross weeks).
-    Column(
-        Modifier.fillMaxSize().pointerInput(Unit) {
-            detectHorizontalDragGestures(
-                onDragStart = { drag = 0f },
-                onDragEnd = {
-                    val day = latestDay.value
-                    val weekday = LocalDate.ofEpochDay(day).dayOfWeek.value % 7 // Sunday 0 … Saturday 6
-                    if (drag > 80f) { if (weekday == 0) tabSwipe(false) else go(day - 1) }
-                    else if (drag < -80f) { if (weekday == 6) tabSwipe(true) else go(day + 1) }
-                },
-                onHorizontalDrag = { _, amount -> drag += amount }
-            )
+    LaunchedEffect(selectedDay) {
+        val page = pageOf(selectedDay)
+        if (weeks.currentPage != page && !weeks.isScrollInProgress) weeks.animateScrollToPage(page)
+    }
+    LaunchedEffect(weeks) {
+        androidx.compose.runtime.snapshotFlow { weeks.settledPage }.drop(1).collect { page ->
+            val day = latestDay.value
+            if (page == pageOf(day)) return@collect
+            // Same weekday in the week swiped to.
+            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            go(homeWeek + (page - WEEK_HOME) * 7L + (day - weekStartOf(day)))
         }
-    ) {
+    }
+    val shownWeek = homeWeek + (weeks.currentPage - WEEK_HOME) * 7L
+
+    Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(top = 18.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Glyph(ZenIcon.Calendar, TodoText, 24.dp, modifier = Modifier.clip(CircleShape).clickable { pickDate = true }.padding(8.dp))
+            HeaderIcon(ZenIcon.Calendar, "Go to date") { pickDate = true }
             Spacer(Modifier.weight(1f))
-            Glyph(ZenIcon.ChevronLeft, TodoMuted, 20.dp, modifier = Modifier.clickable { go(selectedDay - 1) }.padding(horizontal = 8.dp))
-            Text(selectedDate.format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault())), color = TodoText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { go(today) })
-            Glyph(ZenIcon.ChevronRight, TodoMuted, 20.dp, modifier = Modifier.clickable { go(selectedDay + 1) }.padding(horizontal = 8.dp))
+            Glyph(ZenIcon.ChevronLeft, TodoMuted, 20.dp, modifier = Modifier.clip(CircleShape).clickable { go(selectedDay - 7) }.padding(horizontal = 8.dp, vertical = 10.dp))
+            Text(LocalDate.ofEpochDay(shownWeek + 3).format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.getDefault())), color = TodoText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { go(today) }.padding(horizontal = 4.dp, vertical = 6.dp))
+            Glyph(ZenIcon.ChevronRight, TodoMuted, 20.dp, modifier = Modifier.clip(CircleShape).clickable { go(selectedDay + 7) }.padding(horizontal = 8.dp, vertical = 10.dp))
             Spacer(Modifier.weight(1f))
-            Text("Import", color = CalendarBlue, fontSize = 14.sp, modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onImport).padding(horizontal = 8.dp, vertical = 10.dp))
+            SyncButton(onImport)
             LayoutToggle(Layouts.CALENDAR)
             SettingsButton()
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            (0 until 7).forEach { offset ->
-                val date = weekStart.plusDays(offset.toLong())
-                val day = date.toEpochDay()
-                val selected = day == selectedDay
-                val dots = entriesFor(cards, day).take(5)
-                val chip by animateColorAsState(if (selected) GlassAccent else TodoCard, tween(220), label = "dayChip")
-                val ring by animateColorAsState(if (selected) CalendarBlue else veil(0.20f), tween(220), label = "dayRing")
-                Surface(
-                    color = chip,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(if (selected) 2.dp else 1.dp, ring),
-                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).clickable { go(day) }
-                ) {
-                    Column(Modifier.padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(date.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault())), color = if (selected) CalendarBlue else TodoText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Text(date.dayOfMonth.toString(), color = if (selected) CalendarBlue else TodoText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Row(Modifier.height(8.dp).padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            dots.forEach { Box(Modifier.size(5.dp).clip(CircleShape).background(entryColor(it.card))) }
-                        }
-                    }
+        HorizontalPager(
+            state = weeks,
+            modifier = Modifier.fillMaxWidth(),
+            beyondViewportPageCount = 1,
+            key = { it }
+        ) { page ->
+            val weekStart = LocalDate.ofEpochDay(homeWeek + (page - WEEK_HOME) * 7L)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                (0 until 7).forEach { offset ->
+                    val date = weekStart.plusDays(offset.toLong())
+                    val day = date.toEpochDay()
+                    DayChip(date, day == selectedDay, day == today, remember(cards, day) { entriesFor(cards, day).filter { it.card.kind != CardKind.HABIT }.map { entryColor(it.card) } }, Modifier.weight(1f)) { go(day) }
                 }
             }
         }
         Spacer(Modifier.height(10.dp))
         androidx.compose.animation.Crossfade(columnsMode, Modifier.weight(1f).fillMaxWidth(), animationSpec = tween(260), label = "calendarLayout") { columnsShown ->
-        if (!columnsShown) CalendarAgenda(cards, agendaDays, today, agendaState, onDelete, onComplete, onHabitCheckIn)
-        // The day's timeline slides in from the side you swiped toward.
+        if (!columnsShown) CalendarAgenda(cards, agendaDays, today, agendaState, onDelete, onComplete, onHabitCheckIn, onEdit)
+        // The day's timeline slides in from the side of the day picked.
         else AnimatedContent(
             targetState = selectedDay,
             modifier = Modifier.fillMaxSize(),
@@ -243,7 +258,7 @@ internal fun CalendarScreen(
                     Spacer(Modifier.height(20.dp))
                     Text(if (day == today) "You have a free day" else "Nothing planned", color = TodoText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(7.dp))
-                    Text("Add a task with a time and it shows up here", color = TodoMuted, fontSize = 15.sp)
+                    Text("Tap + to add an event with a start and end", color = TodoMuted, fontSize = 15.sp)
                 }
             } else {
                 LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 14.dp, top = 6.dp, bottom = 24.dp)) {
@@ -251,22 +266,28 @@ internal fun CalendarScreen(
                         item(key = "all-day") {
                             Column(Modifier.padding(start = 4.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("All day", color = TodoMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                allDay.forEach { TimelineCard(it, day == today, onDelete, onComplete, onHabitCheckIn) }
+                                allDay.forEach { TimelineCard(it, day == today, onDelete, onComplete, onHabitCheckIn, onEdit) }
                             }
                         }
                     }
                     items(rows.size) { index ->
                         when (val row = rows[index]) {
-                            is TimelineRow.Item -> TimelineSlot(formatClock(row.entry.minute!!), entryColor(row.entry.card)) {
-                                TimelineCard(row.entry, day == today, onDelete, onComplete, onHabitCheckIn)
+                            is TimelineRow.Item -> TimelineSlot(Rail.Wave, entryColor(row.entry.card)) {
+                                val start = row.entry.minute!!
+                                val span = row.entry.card.durationMinutes
+                                Column {
+                                    Text(if (span > 0) "${formatClock(start)} – ${formatClock((start + span) % (24 * 60))}" else formatClock(start), color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+                                    TimelineCard(row.entry, day == today, onDelete, onComplete, onHabitCheckIn, onEdit)
+                                }
                             }
-                            is TimelineRow.Gap -> TimelineSlot(formatClock(row.from % (24 * 60)), TodoMuted.copy(alpha = .5f)) {
-                                Box(Modifier.fillMaxWidth().height(if (row.to - row.from >= 120) 84.dp else 60.dp).padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(TodoCard.copy(alpha = .08f)), contentAlignment = Alignment.Center) {
-                                    Text("${formatGap(row.to - row.from)} ${if (row.to == 24 * 60) "free" else "between tasks"}", color = TodoMuted.copy(alpha = .75f), fontSize = 15.sp)
+                            is TimelineRow.Gap -> TimelineSlot(Rail.Dots, TodoMuted.copy(alpha = .5f)) {
+                                Box(Modifier.fillMaxWidth().height(if (row.to - row.from >= 120) 72.dp else 52.dp).padding(vertical = 6.dp).clip(RoundedCornerShape(14.dp)).background(TodoCard.copy(alpha = .08f)), contentAlignment = Alignment.Center) {
+                                    Text("${formatGap(row.to - row.from)} ${if (row.to == 24 * 60) "free" else "between tasks"}", color = TodoMuted.copy(alpha = .75f), fontSize = 14.sp)
                                 }
                             }
                             TimelineRow.Now -> Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(formatClock(LocalTime.now().let { it.hour * 60 + it.minute }), color = Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(64.dp))
+                                Box(Modifier.width(14.dp), contentAlignment = Alignment.Center) { Box(Modifier.size(8.dp).clip(CircleShape).background(Amber)) }
+                                Text(formatClock(LocalTime.now().let { it.hour * 60 + it.minute }), color = Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
                                 Box(Modifier.weight(1f).height(2.dp).background(Amber))
                             }
                         }
@@ -277,32 +298,124 @@ internal fun CalendarScreen(
         }
         }
     }
-    LaunchedEffect(pickDate) {
-        if (pickDate) {
-            PlatformDatePickerDialog(context, { _, year, month, day ->
-                go(LocalDate.of(year, month + 1, day).toEpochDay())
-                pickDate = false
-            }, selectedDate.year, selectedDate.monthValue - 1, selectedDate.dayOfMonth)
-                .apply { setOnCancelListener { pickDate = false } }.show()
+    if (pickDate) GearDateSheet(selectedDate, onChange = { if (it.toEpochDay() != latestDay.value) go(it.toEpochDay()) }, onDismiss = { pickDate = false })
+}
+
+/** Sync with the phone's calendars; the arrows turn once each time it's tapped. */
+@Composable
+private fun SyncButton(onSync: () -> Unit) {
+    val turn = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    Box(Modifier.graphicsLayer { rotationZ = turn.value }) {
+        HeaderIcon(ZenIcon.Sync, "Sync calendar", CalendarBlue) {
+            onSync()
+            scope.launch { turn.snapTo(0f); turn.animateTo(360f, tween(700, easing = FastOutSlowInEasing)) }
         }
     }
 }
 
-/** A time label on the left, a dotted rail in the middle, content on the right. */
+/** A day in the week strip: weekday, date, and its events as a small polygon of dots under it. */
 @Composable
-private fun TimelineSlot(label: String, railColor: Color, content: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        Text(label.replace(" ", ""), color = TodoMuted, fontSize = 12.sp, maxLines = 1, modifier = Modifier.width(64.dp).padding(top = 14.dp))
-        Canvas(Modifier.width(14.dp).fillMaxHeight()) {
-            var y = 3.dp.toPx()
-            while (y < size.height) {
-                drawCircle(railColor, 2.dp.toPx(), Offset(size.width / 2, y))
-                y += 9.dp.toPx()
+private fun DayChip(date: LocalDate, selected: Boolean, isToday: Boolean, colors: List<Color>, modifier: Modifier, onClick: () -> Unit) {
+    val chip by animateColorAsState(if (selected) GlassAccent else TodoCard, tween(220), label = "dayChip")
+    val ring by animateColorAsState(if (selected) CalendarBlue else if (isToday) CalendarBlue.copy(alpha = .5f) else veil(0.20f), tween(220), label = "dayRing")
+    Surface(
+        color = chip,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(if (selected) 2.dp else 1.dp, ring),
+        modifier = modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick)
+    ) {
+        Column(Modifier.padding(top = 8.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(date.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault())), color = if (selected) CalendarBlue else TodoText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text(date.dayOfMonth.toString(), color = if (selected) CalendarBlue else TodoText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            EventPolygon(colors, Modifier.padding(top = 3.dp).size(20.dp))
+        }
+    }
+}
+
+/**
+ * A day's events as dots at the corners of a regular polygon, one dot per event in its colour: one is a dot, two a
+ * pair, three a triangle, and so on up to an octagon; past eight they sit round a circle. Each edge blends from one
+ * event's colour to the next.
+ */
+@Composable
+internal fun EventPolygon(colors: List<Color>, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val n = colors.size
+        if (n == 0) return@Canvas
+        val center = Offset(size.width / 2, size.height / 2)
+        if (n == 1) { drawCircle(colors[0], 2.6.dp.toPx(), center); return@Canvas }
+        val shown = colors.take(24)
+        val count = shown.size
+        val radius = size.minDimension / 2 - 2.6.dp.toPx()
+        val dot = when { count > 8 -> 1.5.dp.toPx(); count > 5 -> 2.dp.toPx(); else -> 2.3.dp.toPx() }
+        // Two dots lie side by side; otherwise the first corner points up.
+        val startAngle = if (count == 2) 0.0 else -Math.PI / 2
+        val points = List(count) { i ->
+            val a = startAngle + 2 * Math.PI * i / count
+            Offset(center.x + radius * kotlin.math.cos(a).toFloat(), center.y + radius * kotlin.math.sin(a).toFloat())
+        }
+        if (count > 8) {
+            // A circle: each event's colour along its own stretch of the ring.
+            val sweep = 360f / count
+            shown.forEachIndexed { i, c ->
+                drawArc(c.copy(alpha = .75f), -90f + sweep * i, sweep, false, Offset(center.x - radius, center.y - radius), androidx.compose.ui.geometry.Size(radius * 2, radius * 2), style = Stroke(1.dp.toPx()))
+            }
+        } else {
+            val edges = if (count == 2) 1 else count
+            for (i in 0 until edges) {
+                val a = points[i]
+                val b = points[(i + 1) % count]
+                drawLine(Brush.linearGradient(listOf(shown[i].copy(alpha = .8f), shown[(i + 1) % count].copy(alpha = .8f)), a, b), a, b, 1.1.dp.toPx(), cap = StrokeCap.Round)
             }
         }
-        Spacer(Modifier.width(8.dp))
+        points.forEachIndexed { i, p -> drawCircle(shown[i], dot, p) }
+    }
+}
+
+private enum class Rail { Wave, Dots }
+
+/** A rail down the left, then the content: a wavy line in the item's colour beside an item, grey dots beside free time. */
+@Composable
+private fun TimelineSlot(rail: Rail, railColor: Color, content: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        RailLine(rail, railColor, Modifier.width(14.dp).fillMaxHeight())
+        Spacer(Modifier.width(10.dp))
         Box(Modifier.weight(1f)) { content() }
     }
+}
+
+/** The rail itself: a wavy line (an item) or a column of grey dots (free time), down the full height. */
+@Composable
+private fun RailLine(rail: Rail, railColor: Color, modifier: Modifier) {
+        Canvas(modifier) {
+            val x = size.width / 2
+            when (rail) {
+                Rail.Wave -> {
+                    val amp = 3.dp.toPx()
+                    val wave = 14.dp.toPx()
+                    val top = 4.dp.toPx()
+                    val bottom = size.height - 4.dp.toPx()
+                    val path = Path().apply {
+                        moveTo(x, top)
+                        var y = top
+                        val step = 1.5.dp.toPx()
+                        while (y < bottom) {
+                            y = (y + step).coerceAtMost(bottom)
+                            lineTo(x + amp * kotlin.math.sin(2 * Math.PI * (y - top) / wave).toFloat(), y)
+                        }
+                    }
+                    drawPath(path, railColor, style = Stroke(2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                }
+                Rail.Dots -> {
+                    var y = 3.dp.toPx()
+                    while (y < size.height) {
+                        drawCircle(railColor, 1.6.dp.toPx(), Offset(x, y))
+                        y += 8.dp.toPx()
+                    }
+                }
+            }
+        }
 }
 
 @Composable
@@ -311,18 +424,18 @@ private fun TimelineCard(
     isToday: Boolean,
     onDelete: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
-    onHabitCheckIn: (BoardCard) -> Unit
+    onHabitCheckIn: (BoardCard) -> Unit,
+    onEdit: (BoardCard) -> Unit
 ) {
     val card = entry.card
     val color = entryColor(card)
     val glyph = when { card.kind == CardKind.HABIT -> ZenIcon.Timer; card.workspace == Workspace.CALENDAR -> ZenIcon.Calendar; else -> ZenIcon.Checkbox }
     val isEvent = card.workspace == Workspace.CALENDAR
     val interactive = if (card.kind == CardKind.HABIT) isToday else !entry.done
-    val timeLine = entry.minute?.let { start ->
-        if (card.durationMinutes > 0) "${formatClock(start)} - ${formatClock((start + card.durationMinutes) % (24 * 60))} (${formatGap(card.durationMinutes)})" else formatClock(start)
-    }
+    // The times sit above the card; inside, under the name, how long it lasts.
+    val span = if (entry.minute != null && card.durationMinutes > 0) formatSpan(card.durationMinutes) else null
     val shape = RoundedCornerShape(18.dp)
-    Surface(color = color.copy(alpha = .22f), shape = shape, border = GlassStroke, modifier = Modifier.glassBlur(shape).fillMaxWidth().padding(vertical = 4.dp)) {
+    Surface(color = color.copy(alpha = .22f), shape = shape, border = GlassStroke, modifier = Modifier.padding(vertical = 4.dp).glassBlur(shape).fillMaxWidth().clip(shape).clickable { onEdit(card) }) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(color), contentAlignment = Alignment.Center) {
                 Glyph(glyph, Color.White, 22.dp)
@@ -330,12 +443,13 @@ private fun TimelineCard(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(card.title, color = if (entry.done) TodoMuted else TodoText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, textDecoration = if (entry.done) TextDecoration.LineThrough else null, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (timeLine != null) MetaLine(timeLine, TodoMuted, 13.sp, Modifier.padding(top = 2.dp), badges = badgesFor(card))
+                if (span != null) MetaLine(span, TodoMuted, 13.sp, Modifier.padding(top = 2.dp), leading = ZenIcon.Clock, badges = badgesFor(card))
                 else if (card.repeat.isNotBlank()) MetaLine(Repeat.fromId(card.repeat).label, TodoMuted, 13.sp, Modifier.padding(top = 2.dp), leading = ZenIcon.Repeat)
                 else if (card.kind == CardKind.HABIT) Text("Daily habit", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+                else if (badgesFor(card).isNotEmpty()) MetaLine("", TodoMuted, 13.sp, Modifier.padding(top = 2.dp), badges = badgesFor(card))
             }
             if (isEvent) {
-                Glyph(ZenIcon.Close, TodoMuted, 22.dp, modifier = Modifier.clickable { onDelete(card) }.padding(start = 8.dp, end = 6.dp))
+                TapTwiceTrash({ onDelete(card) }, size = 22.dp)
             } else {
                 Box(
                     Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(if (entry.done) color else Color.Transparent)
@@ -374,7 +488,8 @@ private fun CalendarAgenda(
     state: androidx.compose.foundation.lazy.LazyListState,
     onDelete: (BoardCard) -> Unit,
     onComplete: (BoardCard) -> Unit,
-    onHabitCheckIn: (BoardCard) -> Unit
+    onHabitCheckIn: (BoardCard) -> Unit,
+    onEdit: (BoardCard) -> Unit
 ) {
     LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 24.dp)) {
         items(days, key = { it }) { day ->
@@ -387,11 +502,14 @@ private fun CalendarAgenda(
                     entries.count { !it.done }.takeIf { it > 0 }?.toString(), if (day == today) CalendarBlue else TodoMuted
                 )
                 SectionCard {
-                    if (entries.isEmpty()) Text("Nothing planned", color = TodoMuted, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
+                    if (entries.isEmpty()) Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RailLine(Rail.Dots, TodoMuted.copy(alpha = .5f), Modifier.width(12.dp).fillMaxHeight())
+                        Text("Nothing planned", color = TodoMuted, fontSize = 15.sp, modifier = Modifier.padding(start = 12.dp))
+                    }
                     entries.forEachIndexed { i, entry ->
                         key(entry.card.id) {
                             if (i > 0) RowDivider()
-                            AgendaRow(entry, day == today, onDelete, onComplete, onHabitCheckIn)
+                            AgendaRow(entry, day == today, onDelete, onComplete, onHabitCheckIn, onEdit)
                         }
                     }
                 }
@@ -402,27 +520,29 @@ private fun CalendarAgenda(
     }
 }
 
-/** One thing on a day in list mode: its time, a stripe of its colour, the title, and its check (or × for events). */
+/** One thing on a day in list mode: its time, a stripe of its colour, the title, and its check (or a trash for events). */
 @Composable
-private fun AgendaRow(entry: DayEntry, isToday: Boolean, onDelete: (BoardCard) -> Unit, onComplete: (BoardCard) -> Unit, onHabitCheckIn: (BoardCard) -> Unit) {
+private fun AgendaRow(entry: DayEntry, isToday: Boolean, onDelete: (BoardCard) -> Unit, onComplete: (BoardCard) -> Unit, onHabitCheckIn: (BoardCard) -> Unit, onEdit: (BoardCard) -> Unit) {
     val card = entry.card
     val color = entryColor(card)
     val isEvent = card.workspace == Workspace.CALENDAR
     val interactive = if (card.kind == CardKind.HABIT) isToday else !entry.done
     val meta = when {
-        entry.minute != null && card.durationMinutes > 0 -> "until ${formatClock((entry.minute + card.durationMinutes) % (24 * 60))} · ${formatGap(card.durationMinutes)}"
+        entry.minute != null && card.durationMinutes > 0 -> formatSpan(card.durationMinutes)
         card.repeat.isNotBlank() -> Repeat.fromId(card.repeat).label
         card.kind == CardKind.HABIT -> "Daily habit"
         else -> ""
     }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(entry.minute?.let { formatClock(it).replace(" ", "") } ?: "All day", color = if (entry.minute == null) TodoMuted else TodoText, fontSize = 12.sp, maxLines = 1, modifier = Modifier.width(58.dp))
-        Box(Modifier.size(width = 4.dp, height = 32.dp).clip(RoundedCornerShape(2.dp)).background(color))
+    // Start and end above the name, how long it lasts under it, and a wavy line in its colour down the side.
+    val times = entry.minute?.let { start -> if (card.durationMinutes > 0) "${formatClock(start)} – ${formatClock((start + card.durationMinutes) % (24 * 60))}" else formatClock(start) } ?: "All day"
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clickable { onEdit(card) }.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        RailLine(Rail.Wave, color, Modifier.width(12.dp).fillMaxHeight())
         Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
+            Text(times, color = TodoMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             Text(card.title, color = if (entry.done) TodoMuted else TodoText, fontSize = 16.sp, textDecoration = if (entry.done) TextDecoration.LineThrough else null, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (meta.isNotEmpty() || badgesFor(card).isNotEmpty()) MetaLine(meta, TodoMuted, 13.sp, Modifier.padding(top = 2.dp), badges = badgesFor(card))
         }
-        if (isEvent) Glyph(ZenIcon.Close, TodoMuted, 20.dp, modifier = Modifier.clip(CircleShape).clickable { onDelete(card) }.padding(4.dp))
+        if (isEvent) TapTwiceTrash({ onDelete(card) }, size = 20.dp)
         else Box(
             Modifier.size(28.dp).clip(RoundedCornerShape(9.dp)).background(if (entry.done) color else Color.Transparent)
                 .border(2.dp, color.copy(alpha = if (interactive || entry.done) 1f else .4f), RoundedCornerShape(9.dp))
