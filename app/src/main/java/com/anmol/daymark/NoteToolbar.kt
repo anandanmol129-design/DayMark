@@ -105,9 +105,9 @@ private fun ToolButton(action: ToolAction, active: Boolean, more: Boolean = fals
     }
 }
 
-/** The choices of a group, springing up out of its button in a floating pill. */
+/** A floating pill that springs up out of the button it belongs to (place it inside that button's Box). */
 @Composable
-private fun ToolChoices(choices: List<ToolAction>, onClose: () -> Unit) {
+internal fun ToolPopup(onClose: () -> Unit, content: @Composable () -> Unit) {
     val haptics = LocalHapticFeedback.current
     // The popup window is padded by [pad] on every side so the pill's shadow isn't cut off at its edges.
     val pad = with(LocalDensity.current) { 16.dp.roundToPx() }
@@ -132,7 +132,7 @@ private fun ToolChoices(choices: List<ToolAction>, onClose: () -> Unit) {
         properties = PopupProperties(focusable = false, dismissOnClickOutside = true)
     ) {
         val shape = RoundedCornerShape(20.dp)
-        Row(
+        Box(
             Modifier
                 .padding(16.dp)
                 .graphicsLayer {
@@ -142,9 +142,16 @@ private fun ToolChoices(choices: List<ToolAction>, onClose: () -> Unit) {
                     transformOrigin = TransformOrigin(anchorX, 1f)
                 }
                 .shadow(14.dp, shape).clip(shape).background(SheetSolid).border(GlassStroke, shape)
-                .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
+                .padding(6.dp)
+        ) { content() }
+    }
+}
+
+/** The choices of a group, springing up out of its button in a floating pill. */
+@Composable
+private fun ToolChoices(choices: List<ToolAction>, onClose: () -> Unit) {
+    ToolPopup(onClose) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             choices.forEach { choice ->
                 Column(
                     Modifier.width(66.dp).clip(RoundedCornerShape(14.dp))

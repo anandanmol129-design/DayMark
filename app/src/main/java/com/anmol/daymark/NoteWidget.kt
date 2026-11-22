@@ -60,7 +60,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
         /** Markdown flattened to plain lines; images and tables become short stand-ins. */
         fun linesOf(note: BoardCard): List<Line> = buildList {
             if (note.title.isNotBlank()) add(Line(note.title, bold = true, title = true))
-            Markdown.parse(note.details).forEach { block ->
+            Markdown.parse(Transcripts.withoutTranscript(note.details)).forEach { block ->
                 when (block) {
                     is MdBlock.Heading -> add(Line(block.text, bold = true))
                     is MdBlock.Bullet -> add(Line("•  ${block.text}"))

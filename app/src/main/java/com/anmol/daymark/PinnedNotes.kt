@@ -142,6 +142,18 @@ class PinnedNotesReceiver : BroadcastReceiver() {
 /** The editor's pin toggle (same look as its round buttons). Asks for notification permission the first time, as reminders do. */
 @Composable
 internal fun PinNoteButton(noteId: String) {
+    val (pinned, toggle) = rememberPinToggle(noteId)
+    Surface(
+        color = if (pinned) GlassAccent else TodoNav, shape = CircleShape, border = GlassStroke, shadowElevation = 10.dp,
+        modifier = Modifier.size(52.dp).clip(CircleShape).semantics { contentDescription = if (pinned) "Unpin from notifications" else "Pin to notifications" }.clickable(onClick = toggle)
+    ) {
+        Box(contentAlignment = Alignment.Center) { Glyph(ZenIcon.Pin, TodoText, 22.dp) }
+    }
+}
+
+/** Whether [noteId] is pinned to the notifications, and an action that pins or unpins it (asking for permission when needed). */
+@Composable
+internal fun rememberPinToggle(noteId: String): Pair<Boolean, () -> Unit> {
     val context = LocalContext.current
     val tick by PinnedNotes.changes.collectAsState()
     val pinned = remember(tick, noteId) { PinnedNotes.isPinned(context, noteId) }
@@ -149,19 +161,14 @@ internal fun PinNoteButton(noteId: String) {
         if (granted) PinnedNotes.set(context, noteId, true)
         else android.widget.Toast.makeText(context, "Notifications are off, so the note can’t be pinned. Allow them in Settings › Reminders.", android.widget.Toast.LENGTH_LONG).show()
     }
-    Surface(
-        color = if (pinned) GlassAccent else TodoNav, shape = CircleShape, border = GlassStroke, shadowElevation = 10.dp,
-        modifier = Modifier.size(52.dp).clip(CircleShape).semantics { contentDescription = if (pinned) "Unpin from notifications" else "Pin to notifications" }.clickable {
-            when {
-                pinned -> PinnedNotes.set(context, noteId, false)
-                Reminders.needsNotificationPermission(context) -> permission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                else -> {
-                    if (!Reminders.notificationsAllowed(context)) android.widget.Toast.makeText(context, "Notifications are off for Daymark. Allow them in Settings › Reminders.", android.widget.Toast.LENGTH_LONG).show()
-                    else PinnedNotes.set(context, noteId, true)
-                }
+    return pinned to {
+        when {
+            pinned -> PinnedNotes.set(context, noteId, false)
+            Reminders.needsNotificationPermission(context) -> permission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            else -> {
+                if (!Reminders.notificationsAllowed(context)) android.widget.Toast.makeText(context, "Notifications are off for Daymark. Allow them in Settings › Reminders.", android.widget.Toast.LENGTH_LONG).show()
+                else PinnedNotes.set(context, noteId, true)
             }
         }
-    ) {
-        Box(contentAlignment = Alignment.Center) { Glyph(ZenIcon.Pin, TodoText, 22.dp) }
     }
 }

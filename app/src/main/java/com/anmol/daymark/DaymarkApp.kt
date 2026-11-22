@@ -37,6 +37,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -345,18 +346,41 @@ internal fun DaymarkApp(
         }
     }
 
+    // Background work below saves into the newest snapshot, not the one it started with, so nothing changed meanwhile is lost.
+    val latestSnapshot by rememberUpdatedState(snapshot)
+    fun updateCard(id: String, change: (BoardCard) -> BoardCard) {
+        val current = latestSnapshot
+        update(current.copy(cards = current.cards.map { if (it.id == id) change(it) else it }))
+    }
+
     // Fetch a title and preview image for saved links, one at a time.
     val pendingPreview = snapshot.cards.firstOrNull { it.link.isNotBlank() && !it.previewDone }
     LaunchedEffect(pendingPreview?.id) {
         val card = pendingPreview ?: return@LaunchedEffect
         val preview = withContext(Dispatchers.IO) { Saves.fetchPreview(context, card.link) }
-        update(snapshot.copy(cards = snapshot.cards.map {
-            if (it.id != card.id) it else it.copy(
+        updateCard(card.id) {
+            it.copy(
                 previewDone = true,
-                title = if (it.title == Saves.domainOf(it.link)) preview?.title ?: it.title else it.title,
+                // A shared YouTube title often carries the channel and view count; the video's own title reads better.
+                title = if (it.title == Saves.domainOf(it.link) || Transcripts.videoId(it.link) != null) preview?.title ?: it.title else it.title,
                 imagePath = preview?.imagePath ?: it.imagePath
             )
-        }))
+        }
+    }
+
+    // Then, separately (a long video's captions can take a while), the transcript of recently saved YouTube links.
+    // Each is tried once per run of the app; older saves have a "Get transcript" button instead.
+    // A plain set, not state: marking a video as tried must not recompose and cancel the fetch it starts.
+    val triedTranscripts = remember { HashSet<String>() }
+    val pendingTranscript = snapshot.cards.firstOrNull {
+        it.previewDone && it.id !in triedTranscripts && Transcripts.videoId(it.link) != null &&
+            System.currentTimeMillis() - it.createdAt < 3L * 24 * 60 * 60 * 1000 && !Transcripts.hasTranscript(it.details)
+    }
+    LaunchedEffect(pendingTranscript?.id) {
+        val card = pendingTranscript ?: return@LaunchedEffect
+        triedTranscripts += card.id
+        val paragraphs = withContext(Dispatchers.IO) { Transcripts.fetch(card.link) } ?: return@LaunchedEffect
+        updateCard(card.id) { if (Transcripts.hasTranscript(it.details)) it else it.copy(details = Transcripts.append(it.details, paragraphs)) }
     }
     fun addSavedImages(paths: List<String>) {
         val column = snapshot.columns.firstOrNull { it.pageId == DEFAULT_SAVED_PAGE_ID }

@@ -108,9 +108,12 @@ internal fun NotesPagesScreen(
     val columnsMode = Layouts.columns(Layouts.NOTES)
     // In the stacked list, a held note's slot follows the folder section under the finger.
     val sectionTops = remember { HashMap<String, Float>() }
+    val savedColumns = remember(allColumns) { allColumns.filter { it.pageId == DEFAULT_SAVED_PAGE_ID }.map { it.id }.toSet() }
     DragEffects(
         drag, pager = if (columnsMode) pagerState else null, pageIds = pages.map { it.id },
         canTurnTo = { it != DEFAULT_SAVED_PAGE_ID }, // saves are links and pictures, not a place for notes
+        // A save only goes to a bin, and the left column of saves sits in the edge zone, so held saves never turn the page.
+        blockTurn = { drag.card?.columnId in savedColumns },
         onFrame = {
             if (!columnsMode) pages.filter { it.id != DEFAULT_SAVED_PAGE_ID && (sectionTops[it.id] ?: Float.MAX_VALUE) <= drag.finger.y }
                 .maxByOrNull { sectionTops[it.id] ?: 0f }?.let { drag.enterFolder(it.id) }
@@ -142,7 +145,8 @@ internal fun NotesPagesScreen(
             } else NotesListLayout(pages, allColumns, cards, selectedPageId, onSelectPage, onNewPage, onEditCard, privateOpen, drag, sectionTops) { saved, modifier -> pageFor(saved, modifier) }
         }
     }
-    TaskDragLayer(drag, NoteShape) { note -> NoteTileContent(note) }
+    // A held save is drawn as its tile, a held note as its card.
+    TaskDragLayer(drag, NoteShape) { note -> if (note.columnId in savedColumns) SaveTileContent(note) else NoteTileContent(note) }
     }
     sharing?.let { note -> NoteShareSheet(note) { sharing = null } }
 }
@@ -234,9 +238,10 @@ private fun NoteTileContent(note: BoardCard) {
             if (note.title.isNotBlank()) Text(note.title, color = TodoText, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             Text(noteDate(note.createdAt), color = TodoMuted.copy(alpha = .8f), fontSize = 12.sp, letterSpacing = .3.sp, modifier = Modifier.padding(top = 3.dp))
             if (note.link.isNotBlank()) MetaLine(note.link, TodoBlue, 13.sp, Modifier.padding(top = 10.dp), leading = ZenIcon.Link)
-            if (note.details.isNotBlank()) {
+            val body = remember(note.details) { Transcripts.withoutTranscript(note.details) }
+            if (body.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
-                MarkdownText(note.details, maxBlocks = 12, reading = true, skipHeading = note.title)
+                MarkdownText(body, maxBlocks = 12, reading = true, skipHeading = note.title)
             }
             if (note.comment.isNotBlank()) CommentPreview(note.comment, 6, Modifier.padding(top = 10.dp))
         }
@@ -300,10 +305,6 @@ private fun NotesFolderPage(
             verticalAlignment = Alignment.CenterVertically
         ) {
             PageTitle(page?.name ?: "Inbox", deletable = page != null && pages.size > 1 && !isSaved && !privateOpen, onDelete = { page?.let(onDeletePage) }, onEdit = if (page != null && !privateOpen) ({ onRenamePage(page) }) else null, modifier = Modifier.weight(1f))
-            if (isSaved) {
-                GlassPill(ZenIcon.Picture, "Image", onPickImages)
-                Spacer(Modifier.width(8.dp))
-            }
             HeaderIcon(ZenIcon.Folder, "New folder", onClick = onNewPage)
             LayoutToggle(Layouts.NOTES)
             SettingsButton()
@@ -316,13 +317,13 @@ private fun NotesFolderPage(
             modifier = Modifier.padding(start = 22.dp, bottom = 4.dp)
         )
         if (isSaved && folderNotes.isNotEmpty()) {
-            SavedGrid(folderNotes, onOpen = onEditCard, onDelete = onDelete, onTogglePrivate = onTogglePrivate, modifier = Modifier.weight(1f).fillMaxWidth())
+            SavedGrid(folderNotes, drag, folderId, onOpen = onEditCard, modifier = Modifier.weight(1f).fillMaxWidth())
         } else if (folderNotes.isEmpty() && !slotsHere) {
             Column(Modifier.weight(1f).fillMaxWidth().padding(bottom = 40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Glyph(if (privateOpen) ZenIcon.Lock else if (isSaved) ZenIcon.Bookmark else ZenIcon.Note, TodoMuted.copy(alpha = .7f), 44.dp)
                 Spacer(Modifier.height(12.dp))
                 Text(if (privateOpen) (if (isSaved) "No private saves" else "No private notes here") else if (isSaved) "Nothing saved yet" else "No notes in this folder", color = TodoMuted, fontSize = 16.sp)
-                if (privateOpen) Text("Long-press a note or save and choose “Move to Private”", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                if (privateOpen) Text("Hold a note or save and drop it on the lock", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                 else if (isSaved) Text("Share a link or image to “Add to saves”", color = TodoMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                 folder?.let { TextButton(onClick = { onAddCard(it) }) { Text("Add note", color = TodoBlue) } }
             }

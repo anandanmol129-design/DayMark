@@ -89,6 +89,8 @@ object Saves {
 
     /** Best-effort page title and preview image; returns null on any network problem. */
     fun fetchPreview(context: Context, url: String): LinkPreview? = runCatching {
+        // YouTube serves apps a generic page, so ask its oEmbed endpoint for the real title and thumbnail.
+        if (Transcripts.videoId(url) != null) youTubePreview(context, url)?.let { return@runCatching it }
         val connection = open(url)
         val type = connection.contentType.orEmpty()
         if (type.startsWith("image/")) {
@@ -100,6 +102,14 @@ object Saves {
         val imageUrl = (meta(html, "og:image") ?: meta(html, "twitter:image"))?.let { runCatching { URL(URL(url), it).toString() }.getOrNull() }
         val imagePath = imageUrl?.let { runCatching { saveImageBytes(context, readLimited(open(it).inputStream, IMAGE_LIMIT)) }.getOrNull() }
         LinkPreview(title, imagePath)
+    }.getOrNull()
+
+    private fun youTubePreview(context: Context, url: String): LinkPreview? = runCatching {
+        val id = Transcripts.videoId(url) ?: return null
+        val json = org.json.JSONObject(String(readLimited(open("https://www.youtube.com/oembed?format=json&url=" + java.net.URLEncoder.encode("https://www.youtube.com/watch?v=$id", "UTF-8")).inputStream, HTML_LIMIT), Charsets.UTF_8))
+        val title = json.optString("title").takeIf { it.isNotBlank() }
+        val image = json.optString("thumbnail_url").takeIf { it.isNotBlank() }?.let { runCatching { saveImageBytes(context, readLimited(open(it).inputStream, IMAGE_LIMIT)) }.getOrNull() }
+        if (title == null && image == null) null else LinkPreview(title, image)
     }.getOrNull()
 
     private const val HTML_LIMIT = 400_000

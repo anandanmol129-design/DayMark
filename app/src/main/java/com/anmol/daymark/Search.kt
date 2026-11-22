@@ -68,8 +68,15 @@ internal fun searchBoard(snapshot: BoardSnapshot, query: String): List<SearchHit
         // Embedded picture lines are file paths, not text the user wrote.
         if (card.kind == CardKind.TIMER) return@mapNotNull null // time trackers are hidden for now
         if (card.isPrivate) return@mapNotNull null // private notes never show outside their locked section
-        val details = card.details.lines().filterNot { it.trim().startsWith("![") }
-        val matchedLine = details.firstOrNull { it.contains(q, true) }
+        // Only split the text into lines when it matches at all: saved transcripts can run to tens of thousands of words.
+        val matchedLine = if (!card.details.contains(q, true)) null
+            else card.details.lineSequence().filterNot { it.trim().startsWith("![") }.firstOrNull { it.contains(q, true) }?.let { line ->
+                // A long transcript paragraph is cut down to the words around the match.
+                if (line.length <= 160) line else line.indexOf(q, ignoreCase = true).let { at ->
+                    val start = (at - 60).coerceAtLeast(0)
+                    (if (start > 0) "…" else "") + line.substring(start, (at + q.length + 80).coerceAtMost(line.length)).trim() + "…"
+                }
+            }
         val inTitle = card.title.contains(q, true)
         if (!inTitle && matchedLine == null && !card.link.contains(q, true) && !card.comment.contains(q, true)) return@mapNotNull null
         val saved = card.workspace == Workspace.NOTES && columnById[card.columnId]?.pageId == DEFAULT_SAVED_PAGE_ID

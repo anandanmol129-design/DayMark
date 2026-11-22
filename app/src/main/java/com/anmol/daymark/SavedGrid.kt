@@ -1,5 +1,9 @@
 package com.anmol.daymark
 
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.height
 
 import androidx.compose.foundation.layout.width
@@ -71,11 +75,13 @@ internal fun rememberSavedBitmap(path: String): ImageBitmap? {
     return bitmap
 }
 
-/** Two-column masonry of saved images, links and snippets. */
+/**
+ * Two-column masonry of saved images, links and snippets. Tap a save to open it (a bare picture opens full screen);
+ * hold one to lift it, then drop it on the trash, share or Private bins, just like a note.
+ */
 @Composable
-internal fun SavedGrid(saves: List<BoardCard>, onOpen: (BoardCard) -> Unit, onDelete: (BoardCard) -> Unit, modifier: Modifier, onTogglePrivate: (BoardCard) -> Unit = {}) {
+internal fun SavedGrid(saves: List<BoardCard>, drag: TaskDragState, folderId: String, onOpen: (BoardCard) -> Unit, modifier: Modifier) {
     var viewing by remember { mutableStateOf<BoardCard?>(null) }
-    val context = LocalContext.current
     LazyVerticalStaggeredGrid(
         columns = StaggeredGridCells.Fixed(2),
         modifier = modifier,
@@ -84,67 +90,75 @@ internal fun SavedGrid(saves: List<BoardCard>, onOpen: (BoardCard) -> Unit, onDe
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(saves, key = { it.id }) { save ->
-          Box(Modifier.animateItem()) {
-            SaveTile(
-                save = save,
-                // Every save opens like a note; the link and full image are a long-press away.
-                onOpen = { if (save.title.isBlank() && save.details.isBlank() && save.link.isBlank() && save.imagePath.isNotBlank()) viewing = save else onOpen(save) },
-                onOpenLink = { openLink(context, save.link) },
-                onViewImage = { viewing = save },
-                onDelete = { onDelete(save) },
-                onTogglePrivate = { onTogglePrivate(save) }
-            )
-          }
+            Box(Modifier.animateItem()) {
+                // Saves keep their date order, so a lifted one isn't reordered (null order): it only goes to a bin.
+                SaveTile(save, Modifier.dragRow(drag, save, folderId, null, SaveShape) {
+                    if (save.title.isBlank() && save.details.isBlank() && save.link.isBlank() && save.imagePath.isNotBlank()) viewing = save else onOpen(save)
+                })
+            }
         }
     }
     viewing?.let { save -> SavedImageViewer(save) { viewing = null } }
 }
 
+internal val SaveShape = RoundedCornerShape(18.dp)
+
 /** Full-screen view of a saved image; tap anywhere to close. */
 @Composable
-internal fun SavedImageViewer(save: BoardCard, onDismiss: () -> Unit) {
-    val bitmap = rememberSavedBitmap(save.imagePath)
+internal fun SavedImageViewer(save: BoardCard, onDismiss: () -> Unit) = ImageViewer(save.imagePath, onDismiss)
+
+/** Full-screen view of a stored picture: pinch to zoom, drag to look around, tap to close. */
+@Composable
+internal fun ImageViewer(path: String, onDismiss: () -> Unit) {
+    val bitmap = rememberSavedBitmap(path)
+    var zoom by remember { mutableStateOf(1f) }
+    var pan by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color(0xE6000000)).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
-            bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(16.dp)) }
+        Box(
+            Modifier.fillMaxSize().background(Color(0xF0000000))
+                .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }, onDoubleTap = { zoom = if (zoom > 1f) 1f else 2.5f; pan = androidx.compose.ui.geometry.Offset.Zero }) }
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, move, scale, _ ->
+                        zoom = (zoom * scale).coerceIn(1f, 6f)
+                        pan = if (zoom == 1f) androidx.compose.ui.geometry.Offset.Zero else pan + move
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            bitmap?.let {
+                Image(
+                    it, contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(16.dp).graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y }
+                )
+            }
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SaveTile(save: BoardCard, onOpen: () -> Unit, onOpenLink: () -> Unit, onViewImage: () -> Unit, onDelete: () -> Unit, onTogglePrivate: () -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(18.dp)
+private fun SaveTile(save: BoardCard, modifier: Modifier) {
+    Surface(color = TodoCard, shape = SaveShape, border = GlassStroke, modifier = modifier.glassBlur(SaveShape).fillMaxWidth()) {
+        SaveTileContent(save)
+    }
+}
+
+/** What a save shows: its picture, then title, a short preview, your comment and the link. Also drawn while it's held. */
+@Composable
+internal fun SaveTileContent(save: BoardCard) {
     val bitmap = rememberSavedBitmap(save.imagePath)
-    Box {
-        Surface(
-            color = TodoCard,
-            shape = shape,
-            border = GlassStroke,
-            modifier = Modifier.glassBlur(shape).fillMaxWidth().combinedClickable(onClick = onOpen, onLongClick = { menu = true })
-        ) {
-            Column {
-                bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth()) }
-                if (save.title.isNotBlank() || save.link.isNotBlank() || save.details.isNotBlank() || save.comment.isNotBlank()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (save.title.isNotBlank()) Text(save.title, color = TodoText, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                        if (save.details.isNotBlank()) Text(Markdown.preview(save.details, 220), color = TodoText.copy(alpha = .7f), fontSize = 13.sp, lineHeight = 18.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
-                        if (save.comment.isNotBlank()) CommentPreview(save.comment, 4)
-                        if (save.link.isNotBlank()) androidx.compose.foundation.layout.Row(Modifier.padding(top = 2.dp)) {
-                            Glyph(ZenIcon.Link, TodoBlue, 12.dp, modifier = Modifier.padding(top = 3.dp, end = 5.dp))
-                            Text(save.link, color = TodoBlue, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
+    Column {
+        bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth()) }
+        if (save.title.isNotBlank() || save.link.isNotBlank() || save.details.isNotBlank() || save.comment.isNotBlank()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (save.title.isNotBlank()) Text(save.title, color = TodoText, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                val body = remember(save.details) { Markdown.preview(Transcripts.withoutTranscript(save.details), 220) }
+                if (body.isNotBlank()) Text(body, color = TodoText.copy(alpha = .7f), fontSize = 13.sp, lineHeight = 18.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                if (save.comment.isNotBlank()) CommentPreview(save.comment, 4)
+                if (save.link.isNotBlank()) androidx.compose.foundation.layout.Row(Modifier.padding(top = 2.dp)) {
+                    Glyph(ZenIcon.Link, TodoBlue, 12.dp, modifier = Modifier.padding(top = 3.dp, end = 5.dp))
+                    Text(save.link, color = TodoBlue, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
             }
-        }
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("Open") }, onClick = { menu = false; onOpen() })
-            if (save.link.isNotBlank()) DropdownMenuItem(text = { Text("Open link") }, onClick = { menu = false; onOpenLink() })
-            if (save.imagePath.isNotBlank()) DropdownMenuItem(text = { Text("View image") }, onClick = { menu = false; onViewImage() })
-            DropdownMenuItem(text = { Text(if (save.isPrivate) "Remove from Private" else "Move to Private") }, onClick = { menu = false; onTogglePrivate() })
-            DropdownMenuItem(text = { Text("Delete", color = Danger) }, onClick = { menu = false; onDelete() })
         }
     }
 }
